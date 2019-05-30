@@ -5,7 +5,7 @@
 [userspace filesystem](https://en.wikipedia.org/wiki/Filesystem_in_Userspace)
 with responsibilities (such as
 [access control](https://en.wikipedia.org/wiki/Access_control)
-) those beyond data availability & consistency, offloaded.
+) those beyond upright data availability & consistency, offloaded.
 
 Simply deployed alone (1 JDFS server <=> n JDFS clients), JDFS seeks to replace
 [NFS](https://en.wikipedia.org/wiki/Network_File_System)
