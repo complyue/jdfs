@@ -1,0 +1,18 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "JDFS client",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/cmd/jdfc",
+            "env": {},
+            "args": [
+                "-v=3",
+                "jdf://localhost:1113",
+                "/mnt/jdfs/"
+            ]
+        }
+    ]
+}
