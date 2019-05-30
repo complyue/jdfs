@@ -15,15 +15,16 @@ scenarios where
 [it sucks](https://www.kernel.org/doc/ols/2006/ols2006v2-pages-59-72.pdf)
 .
 
-But the main purpose of JDFS is to have its parts (i.e. components at various
-granularity, with server and client the most coarse) integrated into other
-systems (e.g. a homegrown array database) with ease.
+But the main purpose of JDFS is to contribute data focused, performance-critical
+parts (i.e. components at various granularity, with server and client the most
+coarse ones) into analytical solutions (e.g. a homegrown array database),
+with ease.
 
 > In my opinion, what’s going to happen over the next five years is that
 > everyone is going to move from business intelligence to data science,
 > and this data will be a sea change from what I’ll call stupid analytics,
 > to what I’ll call smart analytics, which is correlations, data clustering,
-> predictive modeling, data mining, Bayes classification,
+> predictive modeling, data mining, Bayes classification.
 >
 > All of these words mean complex analytics. All that stuff is defined on
 > arrays, and none of it is in SQL. So the world will move to smart analytics
