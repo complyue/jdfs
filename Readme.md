@@ -17,8 +17,9 @@ scenarios where
 
 But the main purpose of JDFS is to contribute data focused, performance-critical
 parts (i.e. components at various granularity, with server and client the most
-coarse ones) into analytical solutions (e.g. a homegrown array database),
-with ease.
+coarse ones) into analytical solutions (e.g. a homegrown
+[array database](https://en.wikipedia.org/wiki/Array_DBMS)
+), with ease.
 
 > In my opinion, what’s going to happen over the next five years is that
 > everyone is going to move from business intelligence to data science,
