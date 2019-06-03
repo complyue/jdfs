@@ -2,11 +2,13 @@
 package jdfc
 
 import (
+	"context"
 	"fmt"
-	"net/url"
+	"log"
 
-	"bazil.org/fuse"
-	"bazil.org/fuse/fs"
+	"github.com/complyue/jdfs/pkg/fuse"
+	"github.com/complyue/jdfs/pkg/fuseutil"
+
 	"github.com/complyue/hbi"
 	"github.com/complyue/hbi/interop"
 )
@@ -16,9 +18,9 @@ type DataFileServerConnector func(he *hbi.HostingEnv) (
 )
 
 func ServeDataFiles(
-	jdfURL url.URL,
 	jdfsConnector DataFileServerConnector,
 	mountpoint string,
+	cfg *fuse.MountConfig,
 ) error {
 	he := hbi.NewHostingEnv()
 
@@ -31,44 +33,26 @@ func ServeDataFiles(
 	}
 	defer ho.Close()
 
-	c, err := fuse.Mount(
-		mountpoint,
-		fuse.FSName(jdfURL.String()),
-		fuse.Subtype("jdf"),
-		fuse.VolumeName(jdfURL.Fragment),
+	cfg.VolumeName = "JustDataFilesShared" // TODO allow config at server site and pull to here
 
-		//
-		fuse.DefaultPermissions(),
-		fuse.NoAppleDouble(),
-		fuse.NoAppleXattr(),
-		fuse.ExclCreate(),
-
-		//
-		fuse.ReadOnly(),
-		//
-		fuse.AsyncRead(),
-		fuse.WritebackCache(),
-	)
+	// Create the file system.
+	server, err := NewFileSystem()
 	if err != nil {
-		return err
+		panic(err)
 	}
-	defer c.Close()
 
-	if p := c.Protocol(); !p.HasInvalidate() {
+	mfs, err := fuse.Mount(mountpoint, server, cfg)
+	if err != nil {
+		log.Fatalf("Mount: %+v", err)
+	}
+
+	if p := mfs.Protocol(); !p.HasInvalidate() {
 		return fmt.Errorf("kernel FUSE support is too old to have invalidations: version %v", p)
 	}
 
-	filesys := &DataFileSystem{
-		rootINode: 1,
-	}
-	if err = fs.Serve(c, filesys); err != nil {
-		return err
-	}
-
-	// Check if the mount process has an error to report.
-	<-c.Ready
-	if err := c.MountError; err != nil {
-		return err
+	// Wait for it to be unmounted.
+	if err = mfs.Join(context.Background()); err != nil {
+		log.Fatalf("Join: %v", err)
 	}
 
 	po.Disconnect("", false)
@@ -81,11 +65,9 @@ func ServeDataFiles(
 	return nil
 }
 
-type DataFileSystem struct {
-	//
-	rootINode fuse.NodeID
-}
+func NewFileSystem() (server fuse.Server, err error) {
+	fs := &fuseutil.NotImplementedFileSystem{}
 
-func (fs *DataFileSystem) Root() (fs.Node, error) {
-	return nil, nil
+	server = fuseutil.NewFileSystemServer(fs)
+	return
 }

@@ -2,7 +2,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -11,11 +10,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 
-	"github.com/complyue/fuse"
-	"github.com/complyue/fuse-jacobsa/fuseops"
-	"github.com/complyue/fuse-jacobsa/fuseutil"
+	"github.com/complyue/jdfs/pkg/fuse"
+	"github.com/complyue/jdfs/pkg/jdfc"
+
 	"github.com/golang/glog"
 )
 
@@ -30,8 +28,9 @@ func init() {
 
 func main() {
 	flag.Usage = func() {
-		fmt.Fprintln(flag.CommandLine.Output(), `
+		fmt.Fprint(flag.CommandLine.Output(), `
 This is JDFS Client, all options:
+
 `)
 		flag.PrintDefaults()
 		fmt.Fprintf(flag.CommandLine.Output(), `
@@ -42,6 +41,12 @@ Simple usage:
 `, os.Args[0])
 	}
 	flag.Parse()
+
+	var (
+		mpFullPath string
+		jdfsURL    *url.URL
+		err        error
+	)
 
 	urlArg, mpArg := "", ""
 	switch flag.NArg() {
@@ -56,7 +61,7 @@ Simple usage:
 		os.Exit(1)
 	}
 
-	mpFullPath, err := filepath.Abs(mpArg)
+	mpFullPath, err = filepath.Abs(mpArg)
 	if err != nil {
 		log.Fatalf("Error resolving mountpoint path [%s] - %+v", mpArg, err)
 	}
@@ -74,9 +79,9 @@ Simple usage:
 	jdfPath := "/"
 	if len(urlArg) > 0 {
 		// jdfs url specified on cmdl
-		jdfsURL, err := url.Parse(urlArg)
+		jdfsURL, err = url.Parse(urlArg)
 		if err != nil {
-			log.Fatalf("Failed parsing JDFS url [%s]", urlArg, err)
+			log.Fatalf("Failed parsing JDFS url [%s] - %+v", urlArg, err)
 		}
 		if jdfsURL.IsAbs() && "jdf" != jdfsURL.Scheme {
 			log.Fatalf("Invalid JDFS url: [%s]", urlArg)
@@ -143,7 +148,36 @@ Simple usage:
 		jdfPort = "1112"
 	}
 	jdfHost := jdfHostName + ":" + jdfPort
+
+	if jdfsURL == nil {
+		jdfsURL = &url.URL{
+			Scheme: "jdf",
+			Host:   jdfHost,
+			Path:   jdfPath,
+		}
+	}
+	readOnly := len(jdfsURL.Query().Get("ro")) > 0
+
 	fsName := fmt.Sprintf("jdf://%s%s", jdfHost, jdfPath)
+
+	cfg := &fuse.MountConfig{
+		Subtype:  "jdf",
+		FSName:   fsName,
+		ReadOnly: readOnly,
+
+		EnableVnodeCaching: true,
+
+		ErrorLogger: log.New(os.Stderr, "jdfc: ", 0),
+		// DisableWritebackCaching: true,
+
+		Options: map[string]string{
+			"nonempty": "", // allow mounting on to none empty dirs on linux
+		},
+	}
+
+	if glog.V(3) {
+		cfg.DebugLogger = log.New(os.Stderr, "jdfc: ", 0)
+	}
 
 	fmt.Fprintf(os.Stderr, "Mounting %s to %v ...\n", fsName, mpFullPath)
 
@@ -151,350 +185,7 @@ Simple usage:
 		return
 	}
 
-	cfg := &fuse.MountConfig{
-		FSName:                  fsName,
-		ReadOnly:                false,
-		ErrorLogger:             log.New(os.Stderr, "jdfc: ", 0),
-		DisableWritebackCaching: true,
-		EnableVnodeCaching:      true,
-		VolumeName:              fsName,
-		Subtype:                 "jdf",
+	if err = jdfc.ServeDataFiles(jdfc.ConnTCP(jdfHost), mpFullPath, cfg); err != nil {
+		log.Fatal(err)
 	}
-
-	if glog.V(3) {
-		cfg.DebugLogger = log.New(os.Stderr, "jdfc: ", 0)
-	}
-
-	// Create the file system.
-	server, err := NewFileSystem(func(s string) error {
-		glog.Infof("Flush: %s", s)
-		return nil
-	}, func(s string) error {
-		glog.Infof("FSync: %s", s)
-		return nil
-	})
-	if err != nil {
-		panic(err)
-	}
-
-	mfs, err := fuse.Mount(mpFullPath, server, cfg)
-	if err != nil {
-		log.Fatalf("Mount: %v", err)
-	}
-
-	// Wait for it to be unmounted.
-	if err = mfs.Join(context.Background()); err != nil {
-		log.Fatalf("Join: %v", err)
-	}
-}
-
-// Create a file system whose sole contents are a file named "foo" and a
-// directory named "bar".
-//
-// The file may be opened for reading and/or writing. Its initial contents are
-// empty. Whenever a flush or fsync is received, the supplied function will be
-// called with the current contents of the file and its status returned.
-//
-// The directory cannot be modified.
-func NewFileSystem(
-	reportFlush func(string) error,
-	reportFsync func(string) error) (server fuse.Server, err error) {
-	fs := &flushFS{
-		reportFlush: reportFlush,
-		reportFsync: reportFsync,
-	}
-
-	server = fuseutil.NewFileSystemServer(fs)
-	return
-}
-
-const (
-	fooID = fuseops.RootInodeID + 1 + iota
-	barID
-)
-
-type flushFS struct {
-	fuseutil.NotImplementedFileSystem
-
-	reportFlush func(string) error
-	reportFsync func(string) error
-
-	mu          sync.Mutex
-	fooContents []byte // GUARDED_BY(mu)
-}
-
-////////////////////////////////////////////////////////////////////////
-// Helpers
-////////////////////////////////////////////////////////////////////////
-
-// LOCKS_REQUIRED(fs.mu)
-func (fs *flushFS) rootAttributes() fuseops.InodeAttributes {
-	return fuseops.InodeAttributes{
-		Nlink: 1,
-		Mode:  0777 | os.ModeDir,
-	}
-}
-
-// LOCKS_REQUIRED(fs.mu)
-func (fs *flushFS) fooAttributes() fuseops.InodeAttributes {
-	return fuseops.InodeAttributes{
-		Nlink: 1,
-		Mode:  0777,
-		Size:  uint64(len(fs.fooContents)),
-	}
-}
-
-// LOCKS_REQUIRED(fs.mu)
-func (fs *flushFS) barAttributes() fuseops.InodeAttributes {
-	return fuseops.InodeAttributes{
-		Nlink: 1,
-		Mode:  0777 | os.ModeDir,
-	}
-}
-
-// LOCKS_REQUIRED(fs.mu)
-func (fs *flushFS) getAttributes(id fuseops.InodeID) (
-	attrs fuseops.InodeAttributes,
-	err error) {
-	switch id {
-	case fuseops.RootInodeID:
-		attrs = fs.rootAttributes()
-		return
-
-	case fooID:
-		attrs = fs.fooAttributes()
-		return
-
-	case barID:
-		attrs = fs.barAttributes()
-		return
-
-	default:
-		err = fuse.ENOENT
-		return
-	}
-}
-
-////////////////////////////////////////////////////////////////////////
-// FileSystem methods
-////////////////////////////////////////////////////////////////////////
-
-func (fs *flushFS) StatFS(
-	ctx context.Context,
-	op *fuseops.StatFSOp) (err error) {
-	return
-}
-
-func (fs *flushFS) LookUpInode(
-	ctx context.Context,
-	op *fuseops.LookUpInodeOp) (err error) {
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-
-	// Sanity check.
-	if op.Parent != fuseops.RootInodeID {
-		err = fuse.ENOENT
-		return
-	}
-
-	// Set up the entry.
-	switch op.Name {
-	case "foo":
-		op.Entry = fuseops.ChildInodeEntry{
-			Child:      fooID,
-			Attributes: fs.fooAttributes(),
-		}
-
-	case "bar":
-		op.Entry = fuseops.ChildInodeEntry{
-			Child:      barID,
-			Attributes: fs.barAttributes(),
-		}
-
-	default:
-		err = fuse.ENOENT
-		return
-	}
-
-	return
-}
-
-func (fs *flushFS) GetInodeAttributes(
-	ctx context.Context,
-	op *fuseops.GetInodeAttributesOp) (err error) {
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-
-	op.Attributes, err = fs.getAttributes(op.Inode)
-	return
-}
-
-func (fs *flushFS) SetInodeAttributes(
-	ctx context.Context,
-	op *fuseops.SetInodeAttributesOp) (err error) {
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-
-	// Ignore any changes and simply return existing attributes.
-	op.Attributes, err = fs.getAttributes(op.Inode)
-
-	return
-}
-
-func (fs *flushFS) OpenFile(
-	ctx context.Context,
-	op *fuseops.OpenFileOp) (err error) {
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-
-	// Sanity check.
-	if op.Inode != fooID {
-		err = fuse.ENOSYS
-		return
-	}
-
-	return
-}
-
-func (fs *flushFS) ReadFile(
-	ctx context.Context,
-	op *fuseops.ReadFileOp) (err error) {
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-
-	// Ensure the offset is in range.
-	if op.Offset > int64(len(fs.fooContents)) {
-		return
-	}
-
-	// Read what we can.
-	op.BytesRead = copy(op.Dst, fs.fooContents[op.Offset:])
-
-	return
-}
-
-func (fs *flushFS) WriteFile(
-	ctx context.Context,
-	op *fuseops.WriteFileOp) (err error) {
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-
-	// Ensure that the contents slice is long enough.
-	newLen := int(op.Offset) + len(op.Data)
-	if len(fs.fooContents) < newLen {
-		padding := make([]byte, newLen-len(fs.fooContents))
-		fs.fooContents = append(fs.fooContents, padding...)
-	}
-
-	// Copy in the data.
-	n := copy(fs.fooContents[op.Offset:], op.Data)
-
-	// Sanity check.
-	if n != len(op.Data) {
-		panic(fmt.Sprintf("Unexpected short copy: %v", n))
-	}
-
-	return
-}
-
-func (fs *flushFS) SyncFile(
-	ctx context.Context,
-	op *fuseops.SyncFileOp) (err error) {
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-
-	err = fs.reportFsync(string(fs.fooContents))
-	return
-}
-
-func (fs *flushFS) FlushFile(
-	ctx context.Context,
-	op *fuseops.FlushFileOp) (err error) {
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-
-	err = fs.reportFlush(string(fs.fooContents))
-	return
-}
-
-func (fs *flushFS) OpenDir(
-	ctx context.Context,
-	op *fuseops.OpenDirOp) (err error) {
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-
-	// Sanity check.
-	switch op.Inode {
-	case fuseops.RootInodeID:
-	case barID:
-
-	default:
-		err = fuse.ENOENT
-		return
-	}
-
-	return
-}
-
-func (fs *flushFS) ReadDir(
-	ctx context.Context,
-	op *fuseops.ReadDirOp) (err error) {
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-
-	// Create the appropriate listing.
-	var dirents []fuseutil.Dirent
-
-	switch op.Inode {
-	case fuseops.RootInodeID:
-		dirents = []fuseutil.Dirent{
-			fuseutil.Dirent{
-				Offset: 1,
-				Inode:  fooID,
-				Name:   "foo",
-				Type:   fuseutil.DT_File,
-			},
-
-			fuseutil.Dirent{
-				Offset: 2,
-				Inode:  barID,
-				Name:   "bar",
-				Type:   fuseutil.DT_Directory,
-			},
-		}
-
-	case barID:
-
-	default:
-		err = fmt.Errorf("Unexpected inode: %v", op.Inode)
-		return
-	}
-
-	// If the offset is for the end of the listing, we're done. Otherwise we
-	// expect it to be for the start.
-	switch op.Offset {
-	case fuseops.DirOffset(len(dirents)):
-		return
-
-	case 0:
-
-	default:
-		err = fmt.Errorf("Unexpected offset: %v", op.Offset)
-		return
-	}
-
-	// Fill in the listing.
-	for _, de := range dirents {
-		n := fuseutil.WriteDirent(op.Dst[op.BytesRead:], de)
-
-		// We don't support doing this in anything more than one shot.
-		if n == 0 {
-			err = fmt.Errorf("Couldn't fit listing in %v bytes", len(op.Dst))
-			return
-		}
-
-		op.BytesRead += n
-	}
-
-	return
 }
