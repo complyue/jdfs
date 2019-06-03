@@ -109,23 +109,28 @@ Simple usage:
 				} else {
 					magicRoot = strings.TrimSpace(string(magicFc))
 				}
-				if jdfRootURL, err := url.Parse(magicRoot); err != nil {
+				if jdfsRootURL, err := url.Parse(magicRoot); err != nil {
 					log.Fatalf("Failed parsing JDFS root from file [%s] > [%s] - %+v", magicFn, magicRoot, err)
 				} else {
-					if jdfRootURL.IsAbs() && "jdf" != jdfRootURL.Scheme {
+					if jdfsRootURL.IsAbs() && "jdf" != jdfsRootURL.Scheme {
 						log.Fatalf("Invalid JDFS url: [%s] in [%s]", magicRoot, magicFn)
 					}
-					jdfHostName = jdfRootURL.Hostname()
-					jdfPort = jdfRootURL.Port()
+					jdfHostName = jdfsRootURL.Hostname()
+					jdfPort = jdfsRootURL.Port()
 					if mpRel, err := filepath.Rel(atDir, mpFullPath); err != nil {
 						log.Fatalf("Can not determine relative path from [%s] to [%s]", atDir, mpFullPath)
 					} else {
 						glog.V(1).Infof("Using relative path [%s] appended to root JDFS url [%s] configured in [%s]", mpRel, magicRoot, magicFn)
-						if len(jdfRootURL.Path) <= 0 {
+						if len(jdfsRootURL.Path) <= 0 {
 							jdfPath = "/" + mpRel
 						} else {
-							jdfPath = filepath.Join(jdfRootURL.Path, mpRel)
+							jdfPath = filepath.Join(jdfsRootURL.Path, mpRel)
 						}
+
+						// inherite query/fragment from configured root url
+						derivedURL := *jdfsRootURL
+						derivedURL.Path = jdfPath
+						jdfsURL = &derivedURL
 					}
 					break
 				}
@@ -156,7 +161,11 @@ Simple usage:
 			Path:   jdfPath,
 		}
 	}
-	readOnly := len(jdfsURL.Query().Get("ro")) > 0
+
+	readOnly := false
+	if ros, ok := jdfsURL.Query()["ro"]; ok && len(ros) > 0 {
+		readOnly = true
+	}
 
 	fsName := fmt.Sprintf("jdf://%s%s", jdfHost, jdfPath)
 
