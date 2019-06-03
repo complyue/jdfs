@@ -14,9 +14,8 @@ import (
 	"sync"
 
 	"github.com/complyue/fuse"
-	"github.com/complyue/fuse/fuseops"
-	"github.com/complyue/fuse/fuseutil"
-	"github.com/complyue/fuse/samples/flushfs"
+	"github.com/complyue/fuse-jacobsa/fuseops"
+	"github.com/complyue/fuse-jacobsa/fuseutil"
 	"github.com/golang/glog"
 )
 
@@ -144,21 +143,30 @@ Simple usage:
 		jdfPort = "1112"
 	}
 	jdfHost := jdfHostName + ":" + jdfPort
+	fsName := fmt.Sprintf("jdf://%s%s", jdfHost, jdfPath)
 
-	fmt.Fprintf(os.Stderr, "Mounting jdf://%s%s to %v ...\n", jdfHost, jdfPath, mpFullPath)
+	fmt.Fprintf(os.Stderr, "Mounting %s to %v ...\n", fsName, mpFullPath)
 
-	if glog.V(0) {
+	if glog.V(1) {
 		return
 	}
 
-	cfg := &fuse.MountConfig{}
+	cfg := &fuse.MountConfig{
+		FSName:                  fsName,
+		ReadOnly:                false,
+		ErrorLogger:             log.New(os.Stderr, "jdfc: ", 0),
+		DisableWritebackCaching: true,
+		EnableVnodeCaching:      true,
+		VolumeName:              fsName,
+		Subtype:                 "jdf",
+	}
 
 	if glog.V(3) {
 		cfg.DebugLogger = log.New(os.Stderr, "jdfc: ", 0)
 	}
 
 	// Create the file system.
-	server, err := flushfs.NewFileSystem(func(s string) error {
+	server, err := NewFileSystem(func(s string) error {
 		glog.Infof("Flush: %s", s)
 		return nil
 	}, func(s string) error {
