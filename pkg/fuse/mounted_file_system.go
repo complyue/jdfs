@@ -21,6 +21,8 @@ import "context"
 type MountedFileSystem struct {
 	dir string
 
+	protocol Protocol
+
 	// The result to return from Join. Not valid until the channel is closed.
 	joinStatus          error
 	joinStatusAvailable chan struct{}
@@ -30,6 +32,11 @@ type MountedFileSystem struct {
 // attempted to mount it.)
 func (mfs *MountedFileSystem) Dir() string {
 	return mfs.dir
+}
+
+// Protocol returns the protocol used to communicate with the kernel driver.
+func (mfs *MountedFileSystem) Protocol() Protocol {
+	return mfs.protocol
 }
 
 // Join blocks until a mounted file system has been unmounted. It does not

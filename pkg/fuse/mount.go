@@ -97,5 +97,8 @@ func Mount(
 		return
 	}
 
+	// protocol is set during Init op, stays zero valued before ready
+	mfs.protocol = connection.protocol
+
 	return
 }
