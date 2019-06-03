@@ -75,28 +75,28 @@ Simple usage:
 		log.Fatalf("Mountpoint [%s] not a dir!", mpFullPath)
 	}
 
-	jdfHostName, jdfPort := "", ""
-	jdfPath := "/"
+	jdfsHostName, jdfsPort := "", ""
+	jdfsPath := "/"
 	if len(urlArg) > 0 {
 		// jdfs url specified on cmdl
 		jdfsURL, err = url.Parse(urlArg)
 		if err != nil {
 			log.Fatalf("Failed parsing JDFS url [%s] - %+v", urlArg, err)
 		}
-		if jdfsURL.IsAbs() && "jdf" != jdfsURL.Scheme {
+		if jdfsURL.IsAbs() && "jdfs" != jdfsURL.Scheme {
 			log.Fatalf("Invalid JDFS url: [%s]", urlArg)
 		}
-		jdfHostName = jdfsURL.Hostname()
-		jdfPort = jdfsURL.Port()
+		jdfsHostName = jdfsURL.Hostname()
+		jdfsPort = jdfsURL.Port()
 		if len(jdfsURL.Path) <= 0 {
-			jdfPath = "/"
+			jdfsPath = "/"
 		} else {
-			jdfPath = jdfsURL.Path
+			jdfsPath = jdfsURL.Path
 		}
 	} else {
 		// jdfs url not specified, find a magic file for root url
 		for atDir := mpFullPath; ; {
-			magicFn := filepath.Join(atDir, "__jdf_root__")
+			magicFn := filepath.Join(atDir, "__jdfs_root__")
 			if mfi, err := os.Stat(magicFn); err == nil {
 				if mfi.IsDir() {
 					glog.Warningf("JDFS magic should not be a dir: [%s]", magicFn)
@@ -112,24 +112,24 @@ Simple usage:
 				if jdfsRootURL, err := url.Parse(magicRoot); err != nil {
 					log.Fatalf("Failed parsing JDFS root from file [%s] > [%s] - %+v", magicFn, magicRoot, err)
 				} else {
-					if jdfsRootURL.IsAbs() && "jdf" != jdfsRootURL.Scheme {
+					if jdfsRootURL.IsAbs() && "jdfs" != jdfsRootURL.Scheme {
 						log.Fatalf("Invalid JDFS url: [%s] in [%s]", magicRoot, magicFn)
 					}
-					jdfHostName = jdfsRootURL.Hostname()
-					jdfPort = jdfsRootURL.Port()
+					jdfsHostName = jdfsRootURL.Hostname()
+					jdfsPort = jdfsRootURL.Port()
 					if mpRel, err := filepath.Rel(atDir, mpFullPath); err != nil {
 						log.Fatalf("Can not determine relative path from [%s] to [%s]", atDir, mpFullPath)
 					} else {
 						glog.V(1).Infof("Using relative path [%s] appended to root JDFS url [%s] configured in [%s]", mpRel, magicRoot, magicFn)
 						if len(jdfsRootURL.Path) <= 0 {
-							jdfPath = "/" + mpRel
+							jdfsPath = "/" + mpRel
 						} else {
-							jdfPath = filepath.Join(jdfsRootURL.Path, mpRel)
+							jdfsPath = filepath.Join(jdfsRootURL.Path, mpRel)
 						}
 
 						// inherite query/fragment from configured root url
 						derivedURL := *jdfsRootURL
-						derivedURL.Path = jdfPath
+						derivedURL.Path = jdfsPath
 						jdfsURL = &derivedURL
 					}
 					break
@@ -144,54 +144,54 @@ Simple usage:
 		}
 	}
 
-	if len(jdfHostName) <= 0 {
+	if len(jdfsHostName) <= 0 {
 		flag.Usage()
 		os.Exit(2)
 	}
 
-	if len(jdfPort) <= 0 {
-		jdfPort = "1112"
+	if len(jdfsPort) <= 0 {
+		jdfsPort = "1112"
 	}
-	jdfHost := jdfHostName + ":" + jdfPort
+	jdfHost := jdfsHostName + ":" + jdfsPort
+	fsName := fmt.Sprintf("jdfs://%s%s", jdfHost, jdfsPath)
 
 	if jdfsURL == nil {
 		jdfsURL = &url.URL{
-			Scheme: "jdf",
+			Scheme: "jdfs",
 			Host:   jdfHost,
-			Path:   jdfPath,
+			Path:   jdfsPath,
 		}
 	}
 
 	readOnly := false
-	if ros, ok := jdfsURL.Query()["ro"]; ok && len(ros) > 0 {
-		readOnly = true
+	mntOpts := map[string]string{
+		"nonempty": "", // allow mounting on to none empty dirs on linux
+	}
+	for optKey, optVa := range jdfsURL.Query() {
+		if optKey == "ro" {
+			readOnly = true
+		} else {
+			// last value takes precedence if multiple present
+			mntOpts[optKey] = optVa[len(optVa)-1]
+		}
 	}
 
-	fsName := fmt.Sprintf("jdf://%s%s", jdfHost, jdfPath)
-
 	cfg := &fuse.MountConfig{
-		Subtype:  "jdf",
+		Subtype:  "jdfs",
 		FSName:   fsName,
 		ReadOnly: readOnly,
 
+		// caching should be okay once InvalidateNode/InvalidateEntry are implemented and
+		// cache invalidated appropriately. Tracking: https://github.com/jacobsa/fuse/issues/64
 		EnableVnodeCaching: true,
 
 		ErrorLogger: log.New(os.Stderr, "jdfc: ", 0),
-		// DisableWritebackCaching: true,
 
-		Options: map[string]string{
-			"nonempty": "", // allow mounting on to none empty dirs on linux
-		},
+		Options: mntOpts,
 	}
 
 	if glog.V(3) {
 		cfg.DebugLogger = log.New(os.Stderr, "jdfc: ", 0)
-	}
-
-	fmt.Fprintf(os.Stderr, "Mounting %s to %v ...\n", fsName, mpFullPath)
-
-	if glog.V(1) {
-		return
 	}
 
 	if err = jdfc.ServeDataFiles(jdfc.ConnTCP(jdfHost), mpFullPath, cfg); err != nil {
