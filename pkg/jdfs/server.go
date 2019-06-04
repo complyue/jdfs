@@ -21,7 +21,7 @@ type exportedFileSystem struct {
 
 	readonly   bool
 	rootDir    *os.File
-	rootDevice int32
+	rootDevice int64
 	rootInode  fuse.InodeID
 }
 
@@ -55,7 +55,7 @@ func (efs *exportedFileSystem) Mount(readonly bool, jdfsPath string) {
 		return
 	} else if rootStat, ok := fi.Sys().(*syscall.Stat_t); ok {
 		efs.rootDir = rootDir
-		efs.rootDevice = rootStat.Dev
+		efs.rootDevice = int64(rootStat.Dev)
 		efs.rootInode = fuse.InodeID(rootStat.Ino)
 
 		co := efs.ho.Co()

@@ -18,8 +18,6 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
-
-	"github.com/jacobsa/fuse/fuseops"
 )
 
 // Decide on the name of the given op.
@@ -63,7 +61,7 @@ func describeRequest(op interface{}) (s string) {
 	case *unknownOp:
 		addComponent("opcode %d", typed.OpCode)
 
-	case *fuseops.SetInodeAttributesOp:
+	case *SetInodeAttributesOp:
 		if typed.Size != nil {
 			addComponent("size %d", *typed.Size)
 		}
@@ -80,23 +78,23 @@ func describeRequest(op interface{}) (s string) {
 			addComponent("mtime %v", *typed.Mtime)
 		}
 
-	case *fuseops.ReadFileOp:
+	case *ReadFileOp:
 		addComponent("handle %d", typed.Handle)
 		addComponent("offset %d", typed.Offset)
 		addComponent("%d bytes", len(typed.Dst))
 
-	case *fuseops.WriteFileOp:
+	case *WriteFileOp:
 		addComponent("handle %d", typed.Handle)
 		addComponent("offset %d", typed.Offset)
 		addComponent("%d bytes", len(typed.Data))
 
-	case *fuseops.RemoveXattrOp:
+	case *RemoveXattrOp:
 		addComponent("name %s", typed.Name)
 
-	case *fuseops.GetXattrOp:
+	case *GetXattrOp:
 		addComponent("name %s", typed.Name)
 
-	case *fuseops.SetXattrOp:
+	case *SetXattrOp:
 		addComponent("name %s", typed.Name)
 	}
 
@@ -120,7 +118,7 @@ func describeResponse(op interface{}) string {
 
 	// Include a resulting inode number, if available.
 	if f := v.FieldByName("Entry"); f.IsValid() {
-		if entry, ok := f.Interface().(fuseops.ChildInodeEntry); ok {
+		if entry, ok := f.Interface().(ChildInodeEntry); ok {
 			addComponent("inode %v", entry.Child)
 		}
 	}
