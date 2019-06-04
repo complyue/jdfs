@@ -15,17 +15,15 @@ import (
 	"github.com/complyue/hbi/interop"
 )
 
-// DataFileServerConnector is the prototype of a function to establish the HBI connection
-// from jdf client to jdf server.
-type DataFileServerConnector func(he *hbi.HostingEnv) (
-	po *hbi.PostingEnd, ho *hbi.HostingEnd, err error,
-)
-
-// ServeDataFiles serves data files over an HBI connection between this jdf client and the
-// jdf server connected by jdfsConnector, as mounted to mountpoint with mounting
-// configurations from cfg.
-func ServeDataFiles(
-	jdfsConnector DataFileServerConnector,
+// MountJDFS mounts a remote JDFS filesystem directory (can be root path or sub
+// directory under the exported root), to a local mountpoint, then serves
+// fs operations over HBI connections between this JDFS client and the
+// JDFS server, to be established by jdfsConnector.
+func MountJDFS(
+	jdfsConnector func(he *hbi.HostingEnv) (
+		po *hbi.PostingEnd, ho *hbi.HostingEnd, err error,
+	),
+	jdfsPath string,
 	mountpoint string,
 	cfg *fuse.MountConfig,
 ) (err error) {
@@ -49,7 +47,9 @@ func ServeDataFiles(
 		}
 	}()
 
-	fs := &fileSystem{}
+	fs := &fileSystem{
+		jdfsPath: jdfsPath,
+	}
 	mfs, err := fuse.Mount(mountpoint, &fileSystemServer{fs: fs}, cfg)
 	if err != nil {
 		return err
@@ -73,9 +73,7 @@ func ServeDataFiles(
 			return err
 		}
 
-		fs.mu.Lock()
-		fs.po, fs.ho = po, ho
-		fs.mu.Unlock()
+		fs.connReset(po, ho)
 
 		return nil
 	}
@@ -96,6 +94,8 @@ func ServeDataFiles(
 }
 
 type fileSystem struct {
+	jdfsPath string
+
 	po *hbi.PostingEnd
 	ho *hbi.HostingEnd
 
@@ -104,9 +104,28 @@ type fileSystem struct {
 
 func (fs *fileSystem) NamesToExpose() []string {
 	return []string{
+		"Mounted",
 		"InvalidateFileContent",
 		"InvalidateDirEntry",
 	}
+}
+
+func (fs *fileSystem) connReset(
+	po *hbi.PostingEnd, ho *hbi.HostingEnd,
+) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	// TODO mark all open files stale
+
+	fs.po, fs.ho = po, ho
+
+	// TODO, reset cache, initialize root node
+}
+
+func (fs *fileSystem) Mounted(rootInode uint64, servUID, servGID int) {
+	//
+
 }
 
 func (fs *fileSystem) InvalidateFileContent(

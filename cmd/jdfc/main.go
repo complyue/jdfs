@@ -194,7 +194,7 @@ Simple usage:
 		cfg.DebugLogger = log.New(os.Stderr, "jdfc: ", 0)
 	}
 
-	if err = jdfc.ServeDataFiles(jdfc.ConnTCP(jdfHost), mpFullPath, cfg); err != nil {
+	if err = jdfc.ServeDataFiles(jdfc.ConnTCP(jdfHost), jdfsPath, mpFullPath, cfg); err != nil {
 		log.Fatal(err)
 	}
 }
