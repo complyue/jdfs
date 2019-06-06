@@ -4,6 +4,7 @@ package jdfc
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 
 	"github.com/golang/glog"
@@ -48,6 +49,7 @@ func MountJDFS(
 	}()
 
 	fs := &fileSystem{
+		readOnly: cfg.ReadOnly,
 		jdfsPath: jdfsPath,
 	}
 	mfs, err := fuse.Mount(mountpoint, &fileSystemServer{fs: fs}, cfg)
@@ -79,6 +81,10 @@ func MountJDFS(
 	}
 
 	he.ExposeFunction("__hbi_cleanup__", func(discReason string) {
+		if len(discReason) > 0 {
+			fmt.Printf("JDFS server disconnected due to: %s", discReason)
+			os.Exit(6)
+		}
 		// TODO auto reconnect
 	})
 
@@ -94,17 +100,21 @@ func MountJDFS(
 }
 
 type fileSystem struct {
+	readOnly bool
 	jdfsPath string
+
+	mu sync.Mutex
 
 	po *hbi.PostingEnd
 	ho *hbi.HostingEnd
 
-	mu sync.Mutex
+	jdfsRootIno fuse.InodeID
+	jdfsUID     int64
+	jdfsGID     int64
 }
 
 func (fs *fileSystem) NamesToExpose() []string {
 	return []string{
-		"Mounted",
 		"InvalidateFileContent",
 		"InvalidateDirEntry",
 	}
@@ -116,16 +126,48 @@ func (fs *fileSystem) connReset(
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
-	// TODO mark all open files stale
+	// TODO reset cache, mark all open files stale
 
 	fs.po, fs.ho = po, ho
+	if err := func() (err error) {
+		defer func() {
+			if e := recover(); e != nil {
+				err = errors.RichError(e)
+			}
+		}()
 
-	// TODO, reset cache, initialize root node
-}
+		// initiate mount
+		var co *hbi.PoCo
+		co, err = po.NewCo()
+		if err != nil {
+			return
+		}
+		defer co.Close()
+		if err = co.SendCode(fmt.Sprintf(`
+Mount(%#v, %#v)
+`, fs.readOnly, fs.jdfsPath)); err != nil {
+			return
+		}
+		if err = co.StartRecv(); err != nil {
+			return
+		}
+		mountResult, err := co.RecvObj()
+		if err != nil {
+			return err
+		}
+		mountedFields := mountResult.(hbi.LitListType)
+		fs.jdfsRootIno = fuse.InodeID(mountedFields[0].(hbi.LitIntType))
+		fs.jdfsUID = mountedFields[1].(hbi.LitIntType)
+		fs.jdfsGID = mountedFields[2].(hbi.LitIntType)
 
-func (fs *fileSystem) Mounted(rootInode uint64, servUID, servGID int) {
-	//
-
+		return
+	}(); err != nil {
+		fs.po, fs.ho = nil, nil
+		glog.Errorf("JDFS server mount failed: %+v", err)
+		if !po.Disconnected() {
+			po.Disconnect(fmt.Sprintf("server mount failed: %v", err), false)
+		}
+	}
 }
 
 func (fs *fileSystem) InvalidateFileContent(

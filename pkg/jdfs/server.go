@@ -40,15 +40,15 @@ type exportedFileSystem struct {
 	//      maybe a good idea to translate to a fixed value (e.g. 0=root, 1=daemon) ?
 	jdfsUID, jdfsGID int
 
-	// whether readonly, as JDFS client requested on initial mount
-	readonly bool
+	// whether readOnly, as JDFS client requested on initial mount
+	readOnly bool
 
 	// hold the JDFS mounted root dir open to prevent it unlinked before JDFS client disconnected
 	rootDir *os.File
 
 	// nested directory with other filesystems mounted will not be exported to JDFS client
 	//
-	// TODO detect and present nested mountpoints as readonly, empty dirs to JDFS client,
+	// TODO detect and present nested mountpoints as readOnly, empty dirs to JDFS client,
 	//      or support nested fs mounting over JDFS with FUSE generationNumber likely.
 	rootDevice int64
 	// JDFS client is not restricted to mount root of local filesystem of JDFS server,
@@ -64,11 +64,11 @@ func (efs *exportedFileSystem) NamesToExpose() []string {
 	}
 }
 
-func (efs *exportedFileSystem) Mount(readonly bool, jdfsPath string) {
+func (efs *exportedFileSystem) Mount(readOnly bool, jdfsPath string) {
 	efs.jdfsUID = os.Geteuid()
 	efs.jdfsGID = os.Getegid()
 
-	efs.readonly = readonly
+	efs.readOnly = readOnly
 
 	var exportPath string
 	if jdfsPath == "/" || jdfsPath == "" {
@@ -95,9 +95,12 @@ func (efs *exportedFileSystem) Mount(readonly bool, jdfsPath string) {
 		if err := co.StartSend(); err != nil {
 			panic(err)
 		}
-		co.SendCode(fmt.Sprintf(`
-Mounted(%#v, %#v, %#v)
-`, efs.rootInode, efs.jdfsUID, efs.jdfsGID))
+		// send mount result fields
+		if err := co.SendObj(hbi.Repr(hbi.LitListType{
+			efs.rootInode, efs.jdfsUID, efs.jdfsGID,
+		})); err != nil {
+			panic(err)
+		}
 	} else {
 		// todo inspect fs type etc.
 		efs.ho.Disconnect(fmt.Sprintf("Incompatible local filesystem at JDFS server path: [%s]=>[%s]",
