@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"syscall"
+	"unsafe"
 
 	"github.com/golang/glog"
 
@@ -183,14 +185,51 @@ func (fs *fileSystem) InvalidateDirEntry(
 func (fs *fileSystem) StatFS(
 	ctx context.Context,
 	op *fuse.StatFSOp) (err error) {
-	err = fuse.ENOSYS
+	co, err := fs.po.NewCo()
+	if err != nil {
+		return err
+	}
+	defer co.Close()
+	if err = co.SendCode(`StatFS()`); err != nil {
+		return err
+	}
+	if err = co.StartRecv(); err != nil {
+		return err
+	}
+	bufView := ((*[unsafe.Sizeof(*op)]byte)(unsafe.Pointer(op)))[0:unsafe.Sizeof(*op)]
+	if err = co.RecvData(bufView); err != nil {
+		return err
+	}
 	return
 }
 
 func (fs *fileSystem) LookUpInode(
 	ctx context.Context,
 	op *fuse.LookUpInodeOp) (err error) {
-	err = fuse.ENOSYS
+	co, err := fs.po.NewCo()
+	if err != nil {
+		return err
+	}
+	defer co.Close()
+	if err = co.SendCode(fmt.Sprintf(`
+LookUpInode(%#v, %#v)
+`, op.Parent, op.Name)); err != nil {
+		return err
+	}
+	if err = co.StartRecv(); err != nil {
+		return
+	}
+	if found, err := co.RecvObj(); err != nil {
+		return err
+	} else {
+		if found.(hbi.LitIntType) == 0 {
+			return syscall.ENOENT
+		}
+	}
+	bufView := ((*[unsafe.Sizeof(op.Entry)]byte)(unsafe.Pointer(&op.Entry)))[:unsafe.Sizeof(op.Entry)]
+	if err = co.RecvData(bufView); err != nil {
+		return err
+	}
 	return
 }
 

@@ -4,7 +4,7 @@ package jdfs
 import (
 	"fmt"
 	"os"
-	"syscall"
+	"unsafe"
 
 	"github.com/complyue/jdfs/pkg/fuse"
 
@@ -43,24 +43,13 @@ type exportedFileSystem struct {
 	// whether readOnly, as JDFS client requested on initial mount
 	readOnly bool
 
-	// hold the JDFS mounted root dir open to prevent it unlinked before JDFS client disconnected
-	rootDir *os.File
-
-	// nested directory with other filesystems mounted will not be exported to JDFS client
-	//
-	// TODO detect and present nested mountpoints as readOnly, empty dirs to JDFS client,
-	//      or support nested fs mounting over JDFS with FUSE generationNumber likely.
-	rootDevice int64
-	// JDFS client is not restricted to mount root of local filesystem of JDFS server,
-	// in case a nested dir is exported to the JDFS client, JDFS mount root will have inode
-	// other than 1, root inode translation will be perform at both sides, translating 1 to
-	// this value.
-	rootInode fuse.InodeID
+	// in-core filesystem data
+	icd icFSD
 }
 
 func (efs *exportedFileSystem) NamesToExpose() []string {
 	return []string{
-		"Mount",
+		"Mount", "StatFS", "LookUpInode",
 	}
 }
 
@@ -70,42 +59,83 @@ func (efs *exportedFileSystem) Mount(readOnly bool, jdfsPath string) {
 
 	efs.readOnly = readOnly
 
-	var exportPath string
+	var rootPath string
 	if jdfsPath == "/" || jdfsPath == "" {
-		exportPath = efs.exportRoot
+		rootPath = efs.exportRoot
 	} else {
-		exportPath = efs.exportRoot + jdfsPath
+		rootPath = efs.exportRoot + jdfsPath
 	}
 
-	rootDir, err := os.Open(exportPath)
+	if err := os.Chdir(rootPath); err != nil {
+		panic(err)
+	}
+
+	if err := efs.icd.init(rootPath, readOnly); err != nil {
+		efs.ho.Disconnect(fmt.Sprintf("%s", err), true)
+		panic(err)
+	}
+
+	co := efs.ho.Co()
+	if err := co.StartSend(); err != nil {
+		panic(err)
+	}
+
+	// send mount result fields
+	if err := co.SendObj(hbi.Repr(hbi.LitListType{
+		efs.icd.rootInode, efs.jdfsUID, efs.jdfsGID,
+	})); err != nil {
+		panic(err)
+	}
+}
+
+func (efs *exportedFileSystem) StatFS() {
+	co := efs.ho.Co()
+
+	if err := co.StartSend(); err != nil {
+		panic(err)
+	}
+
+	var op fuse.StatFSOp
+
+	op, err := statFS(efs.icd.rootDir)
 	if err != nil {
-		efs.ho.Disconnect(fmt.Sprintf("Bad JDFS server path: [%s]=>[%s]",
-			jdfsPath, exportPath), true)
-	}
-	if fi, err := efs.rootDir.Stat(); err != nil || !fi.IsDir() {
-		efs.ho.Disconnect(fmt.Sprintf("Invalid JDFS server path: [%s]=>[%s]",
-			jdfsPath, exportPath), true)
-		return
-	} else if rootStat, ok := fi.Sys().(*syscall.Stat_t); ok {
-		efs.rootDir = rootDir
-		efs.rootDevice = int64(rootStat.Dev)
-		efs.rootInode = fuse.InodeID(rootStat.Ino)
-
-		co := efs.ho.Co()
-		if err := co.StartSend(); err != nil {
-			panic(err)
-		}
-		// send mount result fields
-		if err := co.SendObj(hbi.Repr(hbi.LitListType{
-			efs.rootInode, efs.jdfsUID, efs.jdfsGID,
-		})); err != nil {
-			panic(err)
-		}
-	} else {
-		// todo inspect fs type etc.
-		efs.ho.Disconnect(fmt.Sprintf("Incompatible local filesystem at JDFS server path: [%s]=>[%s]",
-			jdfsPath, exportPath), true)
-		return
+		panic(err)
 	}
 
+	bufView := ((*[unsafe.Sizeof(op)]byte)(unsafe.Pointer(&op)))[0:unsafe.Sizeof(op)]
+	if err := co.SendData(bufView); err != nil {
+		panic(err)
+	}
+}
+
+func (efs *exportedFileSystem) LookUpInode(parent InodeID, name string) {
+	co := efs.ho.Co()
+
+	if err := co.FinishRecv(); err != nil {
+		panic(err)
+	}
+
+	if parent == fuse.RootID { // translate FUSE root to actual root inode
+		parent = efs.icd.rootInode
+	}
+	ce := efs.icd.LookUpInode(parent, name)
+
+	if err := co.StartSend(); err != nil {
+		panic(err)
+	}
+
+	if ce == nil {
+		if err := co.SendObj(`0`); err != nil {
+			panic(err)
+		}
+		return
+	}
+
+	if err := co.SendObj(`1`); err != nil {
+		panic(err)
+	}
+	bufView := ((*[unsafe.Sizeof(*ce)]byte)(unsafe.Pointer(ce)))[0:unsafe.Sizeof(*ce)]
+	if err := co.SendData(bufView); err != nil {
+		panic(err)
+	}
 }
