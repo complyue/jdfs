@@ -16,7 +16,7 @@ import (
 
 const (
 	META_ATTRS_CACHE_TIME   = 500 * time.Millisecond
-	DIR_CHILDREN_CACHE_TIME = 200 * time.Millisecond
+	DIR_CHILDREN_CACHE_TIME = 1000 * time.Millisecond
 )
 
 type (
@@ -141,18 +141,26 @@ func (icd *icFSD) loadInode(fi os.FileInfo, jdfPath string) (ici *icInode) {
 	if ok {
 		// hard link to a known inode
 		ici = &icd.stoInodes[isi]
+		if inode.inode != ici.inode {
+			panic(errors.New("regInode corrupted ?!"))
+		}
+		if inode.dev != ici.dev {
+			panic(errors.New("inode device changed ?!"))
+		}
 		for _, reachPath := range ici.reachedThrough {
 			if reachPath == jdfPath {
-				panic(errors.Errorf("in-core inode reached by same path twice ?!"))
+				panic(errors.New("in-core inode reached by same path twice ?!"))
 			}
-
-			ici.iNode = inode
-
-			ici.refcnt++
-			ici.reachedThrough = append(ici.reachedThrough, jdfPath)
-			ici.lastChecked = time.Now()
-			ici.children = nil // invalidate cached children list
 		}
+
+		// reached from a new path
+		ici.refcnt++
+		ici.reachedThrough = append(ici.reachedThrough, jdfPath)
+
+		// update meta attrs
+		ici.attrs = inode.attrs
+		ici.lastChecked = time.Now()
+		ici.children = nil // invalidate cached children list
 	} else {
 		// 1st time reaching an inode
 		if nfi := len(icd.freeInoIdxs); nfi > 0 {
@@ -214,6 +222,7 @@ func (icd *icFSD) LookUpInode(parent InodeID, name string) *fuse.ChildInodeEntry
 	}
 }
 
+// must have icd.mu locked
 func (ici *icInode) refreshChildren(icd *icFSD, lookUpName string) (matchedChild *icInode) {
 	var parentPath string
 	var parentDir *os.File
@@ -256,11 +265,19 @@ func (ici *icInode) refreshChildren(icd *icFSD, lookUpName string) (matchedChild
 	if ici.children != nil { // clear content, keep capacity
 		ici.children = ici.children[:0]
 	}
-	if cFIs, err := parentDir.Readdir(0); err != nil {
+	cFIs, err := parentDir.Readdir(0)
+	if err != nil {
 		panic(err)
 	} else {
 		for _, cfi := range cFIs {
+
 			cici := icd.loadInode(cfi, fmt.Sprintf("%s/%s", parentPath, cfi.Name()))
+
+			if cici == nil { // most prolly a nested mount point
+				// keep it invisible to JDFS client
+				continue
+			}
+
 			if cfi.Name() == lookUpName {
 				matchedChild = cici
 			}
