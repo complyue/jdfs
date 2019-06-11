@@ -7,12 +7,14 @@ import (
 	"os"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"github.com/golang/glog"
 
 	"github.com/complyue/jdfs/pkg/errors"
 	"github.com/complyue/jdfs/pkg/fuse"
+	"github.com/complyue/jdfs/pkg/vfs"
 
 	"github.com/complyue/hbi"
 	"github.com/complyue/hbi/interop"
@@ -110,7 +112,7 @@ type fileSystem struct {
 	po *hbi.PostingEnd
 	ho *hbi.HostingEnd
 
-	jdfsRootIno fuse.InodeID
+	jdfsRootIno vfs.InodeID
 	jdfsUID     int64
 	jdfsGID     int64
 }
@@ -158,7 +160,7 @@ Mount(%#v, %#v)
 			return err
 		}
 		mountedFields := mountResult.(hbi.LitListType)
-		fs.jdfsRootIno = fuse.InodeID(mountedFields[0].(hbi.LitIntType))
+		fs.jdfsRootIno = vfs.InodeID(mountedFields[0].(hbi.LitIntType))
 		fs.jdfsUID = mountedFields[1].(hbi.LitIntType)
 		fs.jdfsGID = mountedFields[2].(hbi.LitIntType)
 
@@ -173,18 +175,18 @@ Mount(%#v, %#v)
 }
 
 func (fs *fileSystem) InvalidateFileContent(
-	inode fuse.InodeID, offset, size int64,
+	inode vfs.InodeID, offset, size int64,
 ) {
 }
 
 func (fs *fileSystem) InvalidateDirEntry(
-	dir, inode fuse.InodeID, name string,
+	dir, inode vfs.InodeID, name string,
 ) {
 }
 
 func (fs *fileSystem) StatFS(
 	ctx context.Context,
-	op *fuse.StatFSOp) (err error) {
+	op *vfs.StatFSOp) (err error) {
 	co, err := fs.po.NewCo()
 	if err != nil {
 		return err
@@ -205,7 +207,7 @@ func (fs *fileSystem) StatFS(
 
 func (fs *fileSystem) LookUpInode(
 	ctx context.Context,
-	op *fuse.LookUpInodeOp) (err error) {
+	op *vfs.LookUpInodeOp) (err error) {
 	co, err := fs.po.NewCo()
 	if err != nil {
 		return err
@@ -235,175 +237,192 @@ LookUpInode(%#v, %#v)
 
 func (fs *fileSystem) GetInodeAttributes(
 	ctx context.Context,
-	op *fuse.GetInodeAttributesOp) (err error) {
-	err = fuse.ENOSYS
+	op *vfs.GetInodeAttributesOp) (err error) {
+	co, err := fs.po.NewCo()
+	if err != nil {
+		return err
+	}
+	defer co.Close()
+	if err = co.SendCode(fmt.Sprintf(`
+GetInodeAttributes(%#v)
+`, op.Inode)); err != nil {
+		return err
+	}
+	if err = co.StartRecv(); err != nil {
+		return
+	}
+	bufView := ((*[unsafe.Sizeof(op.Attributes)]byte)(unsafe.Pointer(&op.Attributes)))[:unsafe.Sizeof(op.Attributes)]
+	if err = co.RecvData(bufView); err != nil {
+		return err
+	}
+	op.AttributesExpiration = time.Now().Add(vfs.META_ATTRS_CACHE_TIME)
 	return
 }
 
 func (fs *fileSystem) SetInodeAttributes(
 	ctx context.Context,
-	op *fuse.SetInodeAttributesOp) (err error) {
+	op *vfs.SetInodeAttributesOp) (err error) {
 	err = fuse.ENOSYS
 	return
 }
 
 func (fs *fileSystem) ForgetInode(
 	ctx context.Context,
-	op *fuse.ForgetInodeOp) (err error) {
+	op *vfs.ForgetInodeOp) (err error) {
 	err = fuse.ENOSYS
 	return
 }
 
 func (fs *fileSystem) MkDir(
 	ctx context.Context,
-	op *fuse.MkDirOp) (err error) {
+	op *vfs.MkDirOp) (err error) {
 	err = fuse.ENOSYS
 	return
 }
 
 func (fs *fileSystem) MkNode(
 	ctx context.Context,
-	op *fuse.MkNodeOp) (err error) {
+	op *vfs.MkNodeOp) (err error) {
 	err = fuse.ENOSYS
 	return
 }
 
 func (fs *fileSystem) CreateFile(
 	ctx context.Context,
-	op *fuse.CreateFileOp) (err error) {
+	op *vfs.CreateFileOp) (err error) {
 	err = fuse.ENOSYS
 	return
 }
 
 func (fs *fileSystem) CreateSymlink(
 	ctx context.Context,
-	op *fuse.CreateSymlinkOp) (err error) {
+	op *vfs.CreateSymlinkOp) (err error) {
 	err = fuse.ENOSYS
 	return
 }
 
 func (fs *fileSystem) CreateLink(
 	ctx context.Context,
-	op *fuse.CreateLinkOp) (err error) {
+	op *vfs.CreateLinkOp) (err error) {
 	err = fuse.ENOSYS
 	return
 }
 
 func (fs *fileSystem) Rename(
 	ctx context.Context,
-	op *fuse.RenameOp) (err error) {
+	op *vfs.RenameOp) (err error) {
 	err = fuse.ENOSYS
 	return
 }
 
 func (fs *fileSystem) RmDir(
 	ctx context.Context,
-	op *fuse.RmDirOp) (err error) {
+	op *vfs.RmDirOp) (err error) {
 	err = fuse.ENOSYS
 	return
 }
 
 func (fs *fileSystem) Unlink(
 	ctx context.Context,
-	op *fuse.UnlinkOp) (err error) {
+	op *vfs.UnlinkOp) (err error) {
 	err = fuse.ENOSYS
 	return
 }
 
 func (fs *fileSystem) OpenDir(
 	ctx context.Context,
-	op *fuse.OpenDirOp) (err error) {
+	op *vfs.OpenDirOp) (err error) {
 	err = fuse.ENOSYS
 	return
 }
 
 func (fs *fileSystem) ReadDir(
 	ctx context.Context,
-	op *fuse.ReadDirOp) (err error) {
+	op *vfs.ReadDirOp) (err error) {
 	err = fuse.ENOSYS
 	return
 }
 
 func (fs *fileSystem) ReleaseDirHandle(
 	ctx context.Context,
-	op *fuse.ReleaseDirHandleOp) (err error) {
+	op *vfs.ReleaseDirHandleOp) (err error) {
 	err = fuse.ENOSYS
 	return
 }
 
 func (fs *fileSystem) OpenFile(
 	ctx context.Context,
-	op *fuse.OpenFileOp) (err error) {
+	op *vfs.OpenFileOp) (err error) {
 	err = fuse.ENOSYS
 	return
 }
 
 func (fs *fileSystem) ReadFile(
 	ctx context.Context,
-	op *fuse.ReadFileOp) (err error) {
+	op *vfs.ReadFileOp) (err error) {
 	err = fuse.ENOSYS
 	return
 }
 
 func (fs *fileSystem) WriteFile(
 	ctx context.Context,
-	op *fuse.WriteFileOp) (err error) {
+	op *vfs.WriteFileOp) (err error) {
 	err = fuse.ENOSYS
 	return
 }
 
 func (fs *fileSystem) SyncFile(
 	ctx context.Context,
-	op *fuse.SyncFileOp) (err error) {
+	op *vfs.SyncFileOp) (err error) {
 	err = fuse.ENOSYS
 	return
 }
 
 func (fs *fileSystem) FlushFile(
 	ctx context.Context,
-	op *fuse.FlushFileOp) (err error) {
+	op *vfs.FlushFileOp) (err error) {
 	err = fuse.ENOSYS
 	return
 }
 
 func (fs *fileSystem) ReleaseFileHandle(
 	ctx context.Context,
-	op *fuse.ReleaseFileHandleOp) (err error) {
+	op *vfs.ReleaseFileHandleOp) (err error) {
 	err = fuse.ENOSYS
 	return
 }
 
 func (fs *fileSystem) ReadSymlink(
 	ctx context.Context,
-	op *fuse.ReadSymlinkOp) (err error) {
+	op *vfs.ReadSymlinkOp) (err error) {
 	err = fuse.ENOSYS
 	return
 }
 
 func (fs *fileSystem) RemoveXattr(
 	ctx context.Context,
-	op *fuse.RemoveXattrOp) (err error) {
+	op *vfs.RemoveXattrOp) (err error) {
 	err = fuse.ENOSYS
 	return
 }
 
 func (fs *fileSystem) GetXattr(
 	ctx context.Context,
-	op *fuse.GetXattrOp) (err error) {
+	op *vfs.GetXattrOp) (err error) {
 	err = fuse.ENOSYS
 	return
 }
 
 func (fs *fileSystem) ListXattr(
 	ctx context.Context,
-	op *fuse.ListXattrOp) (err error) {
+	op *vfs.ListXattrOp) (err error) {
 	err = fuse.ENOSYS
 	return
 }
 
 func (fs *fileSystem) SetXattr(
 	ctx context.Context,
-	op *fuse.SetXattrOp) (err error) {
+	op *vfs.SetXattrOp) (err error) {
 	err = fuse.ENOSYS
 	return
 }

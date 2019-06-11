@@ -138,3 +138,25 @@ func (efs *exportedFileSystem) LookUpInode(parent InodeID, name string) {
 		panic(err)
 	}
 }
+
+func (efs *exportedFileSystem) GetInodeAttributes(inode InodeID) {
+	co := efs.ho.Co()
+
+	if err := co.FinishRecv(); err != nil {
+		panic(err)
+	}
+
+	if inode == vfs.RootInodeID { // translate FUSE root to actual root inode
+		inode = efs.icd.rootInode
+	}
+	attrs := efs.icd.GetInode(inode)
+
+	if err := co.StartSend(); err != nil {
+		panic(err)
+	}
+
+	bufView := ((*[unsafe.Sizeof(*attrs)]byte)(unsafe.Pointer(attrs)))[0:unsafe.Sizeof(*attrs)]
+	if err := co.SendData(bufView); err != nil {
+		panic(err)
+	}
+}

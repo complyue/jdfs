@@ -18,7 +18,7 @@ import (
 	"syscall"
 	"unsafe"
 
-	"github.com/complyue/jdfs/pkg/fuse"
+	"github.com/complyue/jdfs/pkg/vfs"
 )
 
 type DirentType uint32
@@ -39,10 +39,10 @@ const (
 type Dirent struct {
 	// The (opaque) offset within the directory file of the entry following this
 	// one. See notes on fuse.ReadDirOp.Offset for details.
-	Offset fuse.DirOffset
+	Offset vfs.DirOffset
 
 	// The inode of the child file or directory, and its name within the parent.
-	Inode fuse.InodeID
+	Inode vfs.InodeID
 	Name  string
 
 	// The type of the child. The zero value (DT_Unknown) is legal, but means

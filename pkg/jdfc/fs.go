@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/complyue/jdfs/pkg/fuse"
+	"github.com/complyue/jdfs/pkg/vfs"
 )
 
 type fileSystemServer struct {
@@ -32,7 +33,7 @@ func (s *fileSystemServer) ServeOps(c *fuse.Connection) {
 		}
 
 		s.opsInFlight.Add(1)
-		if _, ok := op.(*fuse.ForgetInodeOp); ok {
+		if _, ok := op.(*vfs.ForgetInodeOp); ok {
 			// Special case: call in this goroutine for
 			// forget inode ops, which may come in a
 			// flurry from the kernel and are generally
@@ -56,85 +57,85 @@ func (s *fileSystemServer) handleOp(
 	default:
 		err = fuse.ENOSYS
 
-	case *fuse.StatFSOp:
+	case *vfs.StatFSOp:
 		err = s.fs.StatFS(ctx, typed)
 
-	case *fuse.LookUpInodeOp:
+	case *vfs.LookUpInodeOp:
 		err = s.fs.LookUpInode(ctx, typed)
 
-	case *fuse.GetInodeAttributesOp:
+	case *vfs.GetInodeAttributesOp:
 		err = s.fs.GetInodeAttributes(ctx, typed)
 
-	case *fuse.SetInodeAttributesOp:
+	case *vfs.SetInodeAttributesOp:
 		err = s.fs.SetInodeAttributes(ctx, typed)
 
-	case *fuse.ForgetInodeOp:
+	case *vfs.ForgetInodeOp:
 		err = s.fs.ForgetInode(ctx, typed)
 
-	case *fuse.MkDirOp:
+	case *vfs.MkDirOp:
 		err = s.fs.MkDir(ctx, typed)
 
-	case *fuse.MkNodeOp:
+	case *vfs.MkNodeOp:
 		err = s.fs.MkNode(ctx, typed)
 
-	case *fuse.CreateFileOp:
+	case *vfs.CreateFileOp:
 		err = s.fs.CreateFile(ctx, typed)
 
-	case *fuse.CreateLinkOp:
+	case *vfs.CreateLinkOp:
 		err = s.fs.CreateLink(ctx, typed)
 
-	case *fuse.CreateSymlinkOp:
+	case *vfs.CreateSymlinkOp:
 		err = s.fs.CreateSymlink(ctx, typed)
 
-	case *fuse.RenameOp:
+	case *vfs.RenameOp:
 		err = s.fs.Rename(ctx, typed)
 
-	case *fuse.RmDirOp:
+	case *vfs.RmDirOp:
 		err = s.fs.RmDir(ctx, typed)
 
-	case *fuse.UnlinkOp:
+	case *vfs.UnlinkOp:
 		err = s.fs.Unlink(ctx, typed)
 
-	case *fuse.OpenDirOp:
+	case *vfs.OpenDirOp:
 		err = s.fs.OpenDir(ctx, typed)
 
-	case *fuse.ReadDirOp:
+	case *vfs.ReadDirOp:
 		err = s.fs.ReadDir(ctx, typed)
 
-	case *fuse.ReleaseDirHandleOp:
+	case *vfs.ReleaseDirHandleOp:
 		err = s.fs.ReleaseDirHandle(ctx, typed)
 
-	case *fuse.OpenFileOp:
+	case *vfs.OpenFileOp:
 		err = s.fs.OpenFile(ctx, typed)
 
-	case *fuse.ReadFileOp:
+	case *vfs.ReadFileOp:
 		err = s.fs.ReadFile(ctx, typed)
 
-	case *fuse.WriteFileOp:
+	case *vfs.WriteFileOp:
 		err = s.fs.WriteFile(ctx, typed)
 
-	case *fuse.SyncFileOp:
+	case *vfs.SyncFileOp:
 		err = s.fs.SyncFile(ctx, typed)
 
-	case *fuse.FlushFileOp:
+	case *vfs.FlushFileOp:
 		err = s.fs.FlushFile(ctx, typed)
 
-	case *fuse.ReleaseFileHandleOp:
+	case *vfs.ReleaseFileHandleOp:
 		err = s.fs.ReleaseFileHandle(ctx, typed)
 
-	case *fuse.ReadSymlinkOp:
+	case *vfs.ReadSymlinkOp:
 		err = s.fs.ReadSymlink(ctx, typed)
 
-	case *fuse.RemoveXattrOp:
+	case *vfs.RemoveXattrOp:
 		err = s.fs.RemoveXattr(ctx, typed)
 
-	case *fuse.GetXattrOp:
+	case *vfs.GetXattrOp:
 		err = s.fs.GetXattr(ctx, typed)
 
-	case *fuse.ListXattrOp:
+	case *vfs.ListXattrOp:
 		err = s.fs.ListXattr(ctx, typed)
 
-	case *fuse.SetXattrOp:
+	case *vfs.SetXattrOp:
 		err = s.fs.SetXattr(ctx, typed)
 	}
 

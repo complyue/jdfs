@@ -14,17 +14,12 @@ import (
 
 // In-core filesystem data
 
-const (
-	META_ATTRS_CACHE_TIME   = 500 * time.Millisecond
-	DIR_CHILDREN_CACHE_TIME = 1000 * time.Millisecond
-)
-
 type (
 	InodeID         = vfs.InodeID
 	InodeAttributes = vfs.InodeAttributes
 )
 
-type iNode struct {
+type iMeta struct {
 	dev   int64
 	inode InodeID
 	attrs InodeAttributes
@@ -32,8 +27,8 @@ type iNode struct {
 
 // in-core inode info
 type icInode struct {
-	// embed an inode struct
-	iNode
+	// embed an inode meta data struct
+	iMeta
 
 	// the in-core record will be freed when reference count is decreased to zero
 	refcnt int
@@ -172,7 +167,7 @@ func (icd *icFSD) loadInode(fi os.FileInfo, jdfPath string) (ici *icInode) {
 		}
 		ici = &icd.stoInodes[isi]
 		*ici = icInode{
-			iNode: inode,
+			iMeta: inode,
 
 			refcnt:         1,
 			reachedThrough: []string{jdfPath},
@@ -182,6 +177,104 @@ func (icd *icFSD) loadInode(fi os.FileInfo, jdfPath string) (ici *icInode) {
 		return ici
 	}
 	panic("should never reach here")
+}
+
+// must have icd.mu locked
+func (ici *icInode) refreshInode(icd *icFSD, withFile func(path string, f *os.File, fi os.FileInfo)) {
+	var err error
+	var inoPath string
+	var inoF *os.File
+	defer func() {
+		if inoF != nil {
+			inoF.Close()
+		}
+	}()
+	var inoFI os.FileInfo
+	var im iMeta
+	for iPath := len(ici.reachedThrough) - 1; iPath >= 0; ici.reachedThrough, iPath = ici.reachedThrough[:iPath], iPath-1 {
+		inoPath = ici.reachedThrough[iPath]
+		// JDFS server process has mounted root dir as pwd, so can just open jdfPath
+		if inoF != nil {
+			inoF.Close()
+		}
+		inoF, err = os.OpenFile(inoPath, os.O_RDONLY, 0)
+		if err != nil {
+			glog.Warningf("JDFS [%s]:[%s] no longer be inode [%v] - %+v",
+				icd.rootDir.Name(), inoPath, ici.inode, err)
+			inoF = nil
+			continue
+		}
+		if inoFI, err = inoF.Stat(); err == nil {
+			if im = fi2in(inoFI); im.inode != ici.inode {
+				glog.Warningf("JDFS [%s]:[%s] is inode [%v] instead of [%v] now.",
+					icd.rootDir.Name(), inoPath, im.inode, ici.inode)
+				continue
+			}
+		}
+		break // got inoF of same inode
+	}
+	if inoF != nil {
+		ici.attrs = im.attrs
+		ici.lastChecked = time.Now()
+
+		if withFile != nil {
+			withFile(inoPath, inoF, inoFI)
+		}
+	}
+}
+
+// must have icd.mu locked
+func (ici *icInode) refreshChildren(icd *icFSD, lookUpName string) (matchedChild *icInode) {
+	ici.refreshInode(icd, func(parentPath string, parentDir *os.File, parentFI os.FileInfo) {
+
+		if parentDir == nil || !parentFI.IsDir() {
+			// not a dir anymore
+			ici.children = nil
+			return
+		}
+		if ici.children != nil { // clear content, keep capacity
+			ici.children = ici.children[:0]
+		}
+		cFIs, err := parentDir.Readdir(0)
+		if err != nil {
+			panic(err)
+		} else {
+			for _, cfi := range cFIs {
+
+				cici := icd.loadInode(cfi, fmt.Sprintf("%s/%s", parentPath, cfi.Name()))
+
+				if cici == nil { // most prolly a nested mount point
+					// keep it invisible to JDFS client
+					continue
+				}
+
+				if cfi.Name() == lookUpName {
+					matchedChild = cici
+				}
+
+				ici.children = append(ici.children, cici.inode)
+			}
+		}
+
+	})
+	return
+}
+
+func (icd *icFSD) GetInode(inode InodeID) *vfs.InodeAttributes {
+	icd.mu.Lock()
+	defer icd.mu.Unlock()
+
+	isi, ok := icd.regInode[inode]
+	if !ok {
+		panic(errors.Errorf("inode [%v] not in-core ?!", inode))
+	}
+	ici := &icd.stoInodes[isi]
+
+	if time.Now().Sub(ici.lastChecked) > vfs.META_ATTRS_CACHE_TIME {
+		ici.refreshInode(icd, nil)
+	}
+
+	return &ici.attrs
 }
 
 func (icd *icFSD) LookUpInode(parent InodeID, name string) *vfs.ChildInodeEntry {
@@ -195,7 +288,7 @@ func (icd *icFSD) LookUpInode(parent InodeID, name string) *vfs.ChildInodeEntry 
 	ici := &icd.stoInodes[isi]
 
 	var matchedChild *icInode
-	if ici.children == nil || time.Now().Sub(ici.lastChecked) > DIR_CHILDREN_CACHE_TIME {
+	if ici.children == nil || time.Now().Sub(ici.lastChecked) > vfs.DIR_CHILDREN_CACHE_TIME {
 		// reload children
 		matchedChild = ici.refreshChildren(icd, name)
 	} else {
@@ -214,77 +307,10 @@ func (icd *icFSD) LookUpInode(parent InodeID, name string) *vfs.ChildInodeEntry 
 		return nil
 	}
 	return &vfs.ChildInodeEntry{
-		Child:                matchedChild.iNode.inode,
+		Child:                matchedChild.iMeta.inode,
 		Generation:           0,
-		Attributes:           matchedChild.iNode.attrs,
-		AttributesExpiration: time.Now().Add(META_ATTRS_CACHE_TIME),
-		EntryExpiration:      time.Now().Add(DIR_CHILDREN_CACHE_TIME),
+		Attributes:           matchedChild.iMeta.attrs,
+		AttributesExpiration: time.Now().Add(vfs.META_ATTRS_CACHE_TIME),
+		EntryExpiration:      time.Now().Add(vfs.DIR_CHILDREN_CACHE_TIME),
 	}
-}
-
-// must have icd.mu locked
-func (ici *icInode) refreshChildren(icd *icFSD, lookUpName string) (matchedChild *icInode) {
-	var parentPath string
-	var parentDir *os.File
-	var parentFI os.FileInfo
-	defer func() {
-		if parentDir != nil {
-			parentDir.Close()
-		}
-	}()
-	var err error
-	var inode iNode
-	for iPath := len(ici.reachedThrough) - 1; iPath >= 0; ici.reachedThrough, iPath = ici.reachedThrough[:iPath], iPath-1 {
-		parentPath = ici.reachedThrough[iPath]
-		// JDFS server process has mounted root dir as pwd, so can just open jdfPath
-		parentDir, err = os.OpenFile(parentPath, os.O_RDONLY, 0)
-		if err == nil {
-			if parentFI, err = parentDir.Stat(); err == nil {
-				if inode = fi2in(parentFI); inode.inode != ici.inode {
-					err = errors.New("ino changed")
-				}
-			}
-		}
-		if err != nil {
-			glog.Warningf("JDFS [%s] / [%s] no longer be inode [%v] - %+v",
-				icd.rootDir.Name(), parentPath, ici.inode, err)
-			parentDir = nil
-			continue
-		}
-		break // got parentDir of same inode
-	}
-	if parentDir != nil {
-		ici.iNode = inode
-		ici.lastChecked = time.Now()
-	}
-	if parentDir == nil || !parentFI.IsDir() {
-		// not a dir anymore
-		ici.children = nil
-		return
-	}
-	if ici.children != nil { // clear content, keep capacity
-		ici.children = ici.children[:0]
-	}
-	cFIs, err := parentDir.Readdir(0)
-	if err != nil {
-		panic(err)
-	} else {
-		for _, cfi := range cFIs {
-
-			cici := icd.loadInode(cfi, fmt.Sprintf("%s/%s", parentPath, cfi.Name()))
-
-			if cici == nil { // most prolly a nested mount point
-				// keep it invisible to JDFS client
-				continue
-			}
-
-			if cfi.Name() == lookUpName {
-				matchedChild = cici
-			}
-
-			ici.children = append(ici.children, cici.inode)
-		}
-	}
-
-	return
 }
