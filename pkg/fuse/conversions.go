@@ -23,6 +23,13 @@ import (
 	"syscall"
 	"time"
 	"unsafe"
+
+	// vfs was separated from this package (fuse) to be dependable by jdfs while
+	// still buildable for smartos (a.k.a. illumos, solaris), as fuse only support
+	// linux and osx (a.k.a. darwin) atm.
+	// import all artifacts back here to minimize changes in this package for the
+	// separation.
+	. "github.com/complyue/jdfs/pkg/vfs"
 )
 
 ////////////////////////////////////////////////////////////////////////

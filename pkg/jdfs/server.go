@@ -6,9 +6,8 @@ import (
 	"os"
 	"unsafe"
 
-	"github.com/complyue/jdfs/pkg/fuse"
-
 	"github.com/complyue/hbi"
+	"github.com/complyue/jdfs/pkg/vfs"
 )
 
 type exportedFileSystem struct {
@@ -95,7 +94,7 @@ func (efs *exportedFileSystem) StatFS() {
 		panic(err)
 	}
 
-	var op fuse.StatFSOp
+	var op vfs.StatFSOp
 
 	op, err := statFS(efs.icd.rootDir)
 	if err != nil {
@@ -115,7 +114,7 @@ func (efs *exportedFileSystem) LookUpInode(parent InodeID, name string) {
 		panic(err)
 	}
 
-	if parent == fuse.RootID { // translate FUSE root to actual root inode
+	if parent == vfs.RootInodeID { // translate FUSE root to actual root inode
 		parent = efs.icd.rootInode
 	}
 	ce := efs.icd.LookUpInode(parent, name)

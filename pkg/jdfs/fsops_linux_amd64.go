@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"github.com/complyue/jdfs/pkg/errors"
-	"github.com/complyue/jdfs/pkg/fuse"
+	"github.com/complyue/jdfs/pkg/vfs"
 )
 
-func statFS(rootDir *os.File) (op fuse.StatFSOp, err error) {
+func statFS(rootDir *os.File) (op vfs.StatFSOp, err error) {
 
 	var fsStat syscall.Statfs_t
 	if err = syscall.Fstatfs(int(rootDir.Fd()), &fsStat); err != nil {

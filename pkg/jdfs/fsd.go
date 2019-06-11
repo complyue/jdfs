@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/complyue/jdfs/pkg/errors"
-	"github.com/complyue/jdfs/pkg/fuse"
+	"github.com/complyue/jdfs/pkg/vfs"
 	"github.com/golang/glog"
 )
 
@@ -20,8 +20,8 @@ const (
 )
 
 type (
-	InodeID         = fuse.InodeID
-	InodeAttributes = fuse.InodeAttributes
+	InodeID         = vfs.InodeID
+	InodeAttributes = vfs.InodeAttributes
 )
 
 type iNode struct {
@@ -72,7 +72,7 @@ type icFSD struct {
 	// JDFS client is not restricted to only mount root of local filesystem of JDFS server,
 	// in case a nested dir is mounted as JDFS root, inode of mounted root will be other
 	// than 1, which is the constant for FUSE fs root.
-	rootInode fuse.InodeID
+	rootInode vfs.InodeID
 
 	// registry of in-core info of inodes
 	regInode    map[InodeID]int // map to index into stoInodes
@@ -184,7 +184,7 @@ func (icd *icFSD) loadInode(fi os.FileInfo, jdfPath string) (ici *icInode) {
 	panic("should never reach here")
 }
 
-func (icd *icFSD) LookUpInode(parent InodeID, name string) *fuse.ChildInodeEntry {
+func (icd *icFSD) LookUpInode(parent InodeID, name string) *vfs.ChildInodeEntry {
 	icd.mu.Lock()
 	defer icd.mu.Unlock()
 
@@ -213,7 +213,7 @@ func (icd *icFSD) LookUpInode(parent InodeID, name string) *fuse.ChildInodeEntry
 	if matchedChild == nil {
 		return nil
 	}
-	return &fuse.ChildInodeEntry{
+	return &vfs.ChildInodeEntry{
 		Child:                matchedChild.iNode.inode,
 		Generation:           0,
 		Attributes:           matchedChild.iNode.attrs,
