@@ -38,3 +38,10 @@ func fi2in(fi os.FileInfo) iMeta {
 		},
 	}
 }
+
+func chftimes(f *os.File, nsec int64) error {
+	t := syscall.NsecToTimeval(nsec)
+	return syscall.Futimes(int(f.Fd()), []syscall.Timeval{
+		t, t,
+	})
+}

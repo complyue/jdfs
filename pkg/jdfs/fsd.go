@@ -180,7 +180,22 @@ func (icd *icFSD) loadInode(fi os.FileInfo, jdfPath string) (ici *icInode) {
 }
 
 // must have icd.mu locked
-func (ici *icInode) refreshInode(icd *icFSD, withFile func(path string, f *os.File, fi os.FileInfo)) {
+func (icd *icFSD) getInode(inode InodeID) *icInode {
+	isi, ok := icd.regInode[inode]
+	if !ok {
+		panic(errors.Errorf("inode [%v] not in-core ?!", inode))
+	}
+	ici := &icd.stoInodes[isi]
+
+	return ici
+}
+
+// must have icd.mu locked
+func (ici *icInode) reloadInode(icd *icFSD, forWrite bool, withFile func(path string, f *os.File, fi os.FileInfo)) bool {
+	openFlags := os.O_RDONLY
+	if forWrite {
+		openFlags = os.O_RDWR
+	}
 	var err error
 	var inoPath string
 	var inoF *os.File
@@ -197,7 +212,7 @@ func (ici *icInode) refreshInode(icd *icFSD, withFile func(path string, f *os.Fi
 		if inoF != nil {
 			inoF.Close()
 		}
-		inoF, err = os.OpenFile(inoPath, os.O_RDONLY, 0)
+		inoF, err = os.OpenFile(inoPath, openFlags, 0)
 		if err != nil {
 			glog.Warningf("JDFS [%s]:[%s] no longer be inode [%v] - %+v",
 				icd.rootDir.Name(), inoPath, ici.inode, err)
@@ -213,19 +228,24 @@ func (ici *icInode) refreshInode(icd *icFSD, withFile func(path string, f *os.Fi
 		}
 		break // got inoF of same inode
 	}
-	if inoF != nil {
-		ici.attrs = im.attrs
-		ici.lastChecked = time.Now()
 
-		if withFile != nil {
-			withFile(inoPath, inoF, inoFI)
-		}
+	if inoF == nil {
+		return false
 	}
+
+	ici.attrs = im.attrs
+	ici.lastChecked = time.Now()
+
+	if withFile != nil {
+		withFile(inoPath, inoF, inoFI)
+	}
+
+	return true
 }
 
 // must have icd.mu locked
-func (ici *icInode) refreshChildren(icd *icFSD, lookUpName string) (matchedChild *icInode) {
-	ici.refreshInode(icd, func(parentPath string, parentDir *os.File, parentFI os.FileInfo) {
+func (ici *icInode) refreshChildren(icd *icFSD, lookUpName string) (reloaded bool, matchedChild *icInode) {
+	reloaded = ici.reloadInode(icd, false, func(parentPath string, parentDir *os.File, parentFI os.FileInfo) {
 
 		if parentDir == nil || !parentFI.IsDir() {
 			// not a dir anymore
@@ -260,18 +280,23 @@ func (ici *icInode) refreshChildren(icd *icFSD, lookUpName string) (matchedChild
 	return
 }
 
-func (icd *icFSD) GetInode(inode InodeID) *vfs.InodeAttributes {
+func (icd *icFSD) GetInode(inode InodeID) *icInode {
 	icd.mu.Lock()
 	defer icd.mu.Unlock()
 
-	isi, ok := icd.regInode[inode]
-	if !ok {
-		panic(errors.Errorf("inode [%v] not in-core ?!", inode))
-	}
-	ici := &icd.stoInodes[isi]
+	return icd.getInode(inode)
+}
+
+func (icd *icFSD) FetchInode(inode InodeID) *vfs.InodeAttributes {
+	icd.mu.Lock()
+	defer icd.mu.Unlock()
+
+	ici := icd.getInode(inode)
 
 	if time.Now().Sub(ici.lastChecked) > vfs.META_ATTRS_CACHE_TIME {
-		ici.refreshInode(icd, nil)
+		if !ici.reloadInode(icd, false, nil) {
+			panic(errors.Errorf("inode [%v] lost", ici.inode))
+		}
 	}
 
 	return &ici.attrs
@@ -287,10 +312,14 @@ func (icd *icFSD) LookUpInode(parent InodeID, name string) *vfs.ChildInodeEntry 
 	}
 	ici := &icd.stoInodes[isi]
 
+	var reloaded bool
 	var matchedChild *icInode
 	if ici.children == nil || time.Now().Sub(ici.lastChecked) > vfs.DIR_CHILDREN_CACHE_TIME {
 		// reload children
-		matchedChild = ici.refreshChildren(icd, name)
+		reloaded, matchedChild = ici.refreshChildren(icd, name)
+		if !reloaded {
+			return nil
+		}
 	} else {
 		for _, cInode := range ici.children {
 			cisi := icd.regInode[cInode]
@@ -313,4 +342,40 @@ func (icd *icFSD) LookUpInode(parent InodeID, name string) *vfs.ChildInodeEntry 
 		AttributesExpiration: time.Now().Add(vfs.META_ATTRS_CACHE_TIME),
 		EntryExpiration:      time.Now().Add(vfs.DIR_CHILDREN_CACHE_TIME),
 	}
+}
+
+func (icd *icFSD) SetInodeAttributes(inode InodeID,
+	chgSize, chgMode, chgMtime bool,
+	sz uint64, mode uint32, mNsec int64,
+) *icInode {
+	icd.mu.Lock()
+	defer icd.mu.Unlock()
+
+	ici := icd.getInode(inode)
+	if !ici.reloadInode(icd, true, func(inoPath string, inoF *os.File, inoFI os.FileInfo) {
+
+		if chgSize {
+			if err := inoF.Truncate(int64(sz)); err != nil {
+				panic(err)
+			}
+		}
+
+		if chgMode {
+			if err := inoF.Chmod(os.FileMode(mode)); err != nil {
+				panic(err)
+			}
+		}
+
+		if chgMtime {
+
+			if err := chftimes(inoF, mNsec); err != nil {
+				panic(err)
+			}
+
+		}
+
+	}) {
+		panic(errors.Errorf("inode [%v] lost", ici.inode))
+	}
+	return ici
 }

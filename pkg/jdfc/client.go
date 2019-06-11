@@ -262,7 +262,50 @@ GetInodeAttributes(%#v)
 func (fs *fileSystem) SetInodeAttributes(
 	ctx context.Context,
 	op *vfs.SetInodeAttributesOp) (err error) {
-	err = fuse.ENOSYS
+	co, err := fs.po.NewCo()
+	if err != nil {
+		return err
+	}
+	defer co.Close()
+
+	// intentionally avoid atime update
+	var (
+		chgSizeTo      uint64
+		chgModeTo      uint32
+		chgMtimeToNsec int64
+	)
+	if op.Size != nil {
+		chgSizeTo = *op.Size
+	}
+	if op.Mode != nil {
+		chgModeTo = uint32(*op.Mode)
+	}
+	if op.Mtime != nil {
+		chgMtimeToNsec = op.Mtime.UnixNano()
+	}
+
+	if err = co.SendCode(fmt.Sprintf(`
+SetInodeAttributes(%#v,
+%#v, %#v, %#v,
+%#v, %#v, %#v,
+)
+`, op.Inode,
+		op.Size != nil, op.Mode != nil, op.Mtime != nil,
+		chgSizeTo, chgModeTo, chgMtimeToNsec,
+	)); err != nil {
+		return err
+	}
+
+	if err = co.StartRecv(); err != nil {
+		return err
+	}
+
+	bufView := ((*[unsafe.Sizeof(op.Attributes)]byte)(unsafe.Pointer(&op.Attributes)))[:unsafe.Sizeof(op.Attributes)]
+	if err = co.RecvData(bufView); err != nil {
+		return err
+	}
+	op.AttributesExpiration = time.Now().Add(vfs.META_ATTRS_CACHE_TIME)
+
 	return
 }
 

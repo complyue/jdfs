@@ -7,6 +7,7 @@ import (
 	"unsafe"
 
 	"github.com/complyue/hbi"
+	"github.com/complyue/jdfs/pkg/errors"
 	"github.com/complyue/jdfs/pkg/vfs"
 )
 
@@ -48,7 +49,7 @@ type exportedFileSystem struct {
 
 func (efs *exportedFileSystem) NamesToExpose() []string {
 	return []string{
-		"Mount", "StatFS", "LookUpInode",
+		"Mount", "StatFS", "LookUpInode", "GetInodeAttributes", "SetInodeAttributes",
 	}
 }
 
@@ -149,11 +150,45 @@ func (efs *exportedFileSystem) GetInodeAttributes(inode InodeID) {
 	if inode == vfs.RootInodeID { // translate FUSE root to actual root inode
 		inode = efs.icd.rootInode
 	}
-	attrs := efs.icd.GetInode(inode)
+	attrs := efs.icd.FetchInode(inode)
 
 	if err := co.StartSend(); err != nil {
 		panic(err)
 	}
+
+	bufView := ((*[unsafe.Sizeof(*attrs)]byte)(unsafe.Pointer(attrs)))[0:unsafe.Sizeof(*attrs)]
+	if err := co.SendData(bufView); err != nil {
+		panic(err)
+	}
+}
+
+func (efs *exportedFileSystem) SetInodeAttributes(inode InodeID,
+	chgSize, chgMode, chgMtime bool,
+	sz uint64, mode uint32, mNsec int64,
+) {
+	co := efs.ho.Co()
+
+	if err := co.FinishRecv(); err != nil {
+		panic(err)
+	}
+
+	if inode == vfs.RootInodeID { // translate FUSE root to actual root inode
+		inode = efs.icd.rootInode
+	}
+
+	ici := efs.icd.SetInodeAttributes(inode,
+		chgSize, chgMode, chgMtime,
+		sz, mode, mNsec,
+	)
+	if ici == nil {
+		panic(errors.Errorf("no inode [%v] ?!", inode))
+	}
+
+	if err := co.StartSend(); err != nil {
+		panic(err)
+	}
+
+	attrs := &ici.attrs
 
 	bufView := ((*[unsafe.Sizeof(*attrs)]byte)(unsafe.Pointer(attrs)))[0:unsafe.Sizeof(*attrs)]
 	if err := co.SendData(bufView); err != nil {
