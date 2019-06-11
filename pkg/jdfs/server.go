@@ -195,3 +195,17 @@ func (efs *exportedFileSystem) SetInodeAttributes(inode InodeID,
 		panic(err)
 	}
 }
+
+func (efs *exportedFileSystem) ForgetInode(inode InodeID, n int) {
+	co := efs.ho.Co()
+
+	if err := co.FinishRecv(); err != nil {
+		panic(err)
+	}
+
+	if inode == vfs.RootInodeID || inode == efs.icd.rootInode {
+		return // never forget about root
+	}
+
+	efs.icd.ForgetInode(inode, n)
+}

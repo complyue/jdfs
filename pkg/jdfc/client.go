@@ -312,7 +312,18 @@ SetInodeAttributes(%#v,
 func (fs *fileSystem) ForgetInode(
 	ctx context.Context,
 	op *vfs.ForgetInodeOp) (err error) {
-	err = fuse.ENOSYS
+	co, err := fs.po.NewCo()
+	if err != nil {
+		return err
+	}
+	defer co.Close()
+
+	if err = co.SendCode(fmt.Sprintf(`
+ForgetInode(%#v, %#v)
+`, op.Inode, op.N)); err != nil {
+		panic(err)
+	}
+
 	return
 }
 
@@ -471,4 +482,5 @@ func (fs *fileSystem) SetXattr(
 }
 
 func (fs *fileSystem) Destroy() {
+	fs.po.Close()
 }

@@ -179,6 +179,39 @@ func (icd *icFSD) loadInode(fi os.FileInfo, jdfPath string) (ici *icInode) {
 	panic("should never reach here")
 }
 
+func (icd *icFSD) ForgetInode(inode InodeID, n int) {
+	icd.mu.Lock()
+	defer icd.mu.Unlock()
+
+	if inode == icd.rootInode {
+		panic(errors.Errorf("forget root ?!"))
+	}
+
+	if n <= 0 {
+		panic(errors.Errorf("forget %d ref ?!", n))
+	}
+
+	isi, ok := icd.regInode[inode]
+	if !ok {
+		panic(errors.Errorf("inode [%v] not in-core ?!", inode))
+	}
+	ici := &icd.stoInodes[isi]
+
+	ici.refcnt -= n
+
+	if ici.refcnt < 0 {
+		panic(errors.Errorf("fuse ref counting problem ?!"))
+	}
+
+	if ici.refcnt > 0 {
+		return // still referenced
+	}
+
+	delete(icd.regInode, inode)
+	icd.stoInodes[isi] = icInode{} // clear all fields to zero values
+	icd.freeInoIdxs = append(icd.freeInoIdxs, isi)
+}
+
 // must have icd.mu locked
 func (icd *icFSD) getInode(inode InodeID) *icInode {
 	isi, ok := icd.regInode[inode]
