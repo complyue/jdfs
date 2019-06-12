@@ -306,6 +306,9 @@ func (ici *icInode) refreshChildren(icd *icFSD, lookUpName string) (reloaded boo
 		if err != nil {
 			panic(err)
 		} else {
+			if cap(ici.children) < len(cFIs) {
+				ici.children = make([]InodeID, 0, len(cFIs))
+			}
 			for _, cfi := range cFIs {
 
 				cici := icd.loadInode(cfi, fmt.Sprintf("%s/%s", parentPath, cfi.Name()))
@@ -449,6 +452,7 @@ func (icd *icFSD) MkDir(parent InodeID, name string, mode uint32) (ce *vfs.Child
 	ici := &icd.stoInodes[isi]
 
 	if !ici.reloadInode(icd, true, func(parentPath string, parentDir *os.File, parentFI os.FileInfo) {
+
 		if fsErr = os.Mkdir(fmt.Sprintf("%s/%s", parentPath, name), os.FileMode(mode)); fsErr != nil {
 			return
 		}
@@ -460,6 +464,9 @@ func (icd *icFSD) MkDir(parent InodeID, name string, mode uint32) (ce *vfs.Child
 		if err != nil {
 			panic(err)
 		} else {
+			if cap(ici.children) < len(cFIs) {
+				ici.children = make([]InodeID, 0, len(cFIs))
+			}
 			for _, cfi := range cFIs {
 
 				cici := icd.loadInode(cfi, fmt.Sprintf("%s/%s", parentPath, cfi.Name()))
@@ -503,6 +510,7 @@ func (icd *icFSD) CreateFile(parent InodeID, name string, mode uint32) (
 	ici := &icd.stoInodes[isi]
 
 	if !ici.reloadInode(icd, true, func(parentPath string, parentDir *os.File, parentFI os.FileInfo) {
+
 		childPath := fmt.Sprintf("%s/%s", parentPath, name)
 		var cF *os.File
 		var cici *icInode
@@ -563,6 +571,7 @@ func (icd *icFSD) CreateSymlink(parent InodeID, name string, target string) (ce 
 	ici := &icd.stoInodes[isi]
 
 	if !ici.reloadInode(icd, true, func(parentPath string, parentDir *os.File, parentFI os.FileInfo) {
+
 		if fsErr = os.Symlink(target, fmt.Sprintf("%s/%s", parentPath, name)); fsErr != nil {
 			return
 		}
@@ -574,6 +583,9 @@ func (icd *icFSD) CreateSymlink(parent InodeID, name string, target string) (ce 
 		if err != nil {
 			panic(err)
 		} else {
+			if cap(ici.children) < len(cFIs) {
+				ici.children = make([]InodeID, 0, len(cFIs))
+			}
 			for _, cfi := range cFIs {
 
 				cici := icd.loadInode(cfi, fmt.Sprintf("%s/%s", parentPath, cfi.Name()))
@@ -597,6 +609,74 @@ func (icd *icFSD) CreateSymlink(parent InodeID, name string, target string) (ce 
 			}
 		}
 
+	}) {
+		glog.Warningf("inode [%v] lost", ici.inode)
+		fsErr = vfs.ENOENT
+	}
+
+	return
+}
+
+func (icd *icFSD) CreateLink(parent InodeID, name string, target InodeID) (ce *vfs.ChildInodeEntry, fsErr error) {
+	icd.mu.Lock()
+	defer icd.mu.Unlock()
+
+	isi, ok := icd.regInode[parent]
+	if !ok {
+		panic(errors.Errorf("parent inode [%v] not in-core ?!", parent))
+	}
+	ici := &icd.stoInodes[isi]
+
+	isiTarget, ok := icd.regInode[target]
+	if !ok {
+		panic(errors.Errorf("target inode [%v] not in-core ?!", target))
+	}
+	iciTarget := &icd.stoInodes[isiTarget]
+
+	if !ici.reloadInode(icd, true, func(parentPath string, parentDir *os.File, parentFI os.FileInfo) {
+		if !iciTarget.reloadInode(icd, false, func(targetPath string, targetDir *os.File, targetFI os.FileInfo) {
+
+			if fsErr = os.Link(targetPath, fmt.Sprintf("%s/%s", parentPath, name)); fsErr != nil {
+				return
+			}
+
+			if ici.children != nil { // clear content, keep capacity
+				ici.children = ici.children[:0]
+			}
+			cFIs, err := parentDir.Readdir(0)
+			if err != nil {
+				panic(err)
+			} else {
+				if cap(ici.children) < len(cFIs) {
+					ici.children = make([]InodeID, 0, len(cFIs))
+				}
+				for _, cfi := range cFIs {
+
+					cici := icd.loadInode(cfi, fmt.Sprintf("%s/%s", parentPath, cfi.Name()))
+
+					if cici == nil { // most prolly a nested mount point
+						// keep it invisible to JDFS client
+						continue
+					}
+
+					if cfi.Name() == name {
+						ce = &vfs.ChildInodeEntry{
+							Child:                cici.iMeta.inode,
+							Generation:           0,
+							Attributes:           cici.iMeta.attrs,
+							AttributesExpiration: time.Now().Add(vfs.META_ATTRS_CACHE_TIME),
+							EntryExpiration:      time.Now().Add(vfs.DIR_CHILDREN_CACHE_TIME),
+						}
+					}
+
+					ici.children = append(ici.children, cici.inode)
+				}
+			}
+
+		}) {
+			glog.Warningf("inode [%v] lost", iciTarget.inode)
+			fsErr = vfs.ENOENT
+		}
 	}) {
 		glog.Warningf("inode [%v] lost", ici.inode)
 		fsErr = vfs.ENOENT

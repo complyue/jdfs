@@ -339,3 +339,43 @@ func (efs *exportedFileSystem) CreateSymlink(parent InodeID, name string, target
 		panic(err)
 	}
 }
+
+func (efs *exportedFileSystem) CreateLink(parent InodeID, name string, target InodeID) {
+	co := efs.ho.Co()
+
+	if err := co.FinishRecv(); err != nil {
+		panic(err)
+	}
+
+	ce, fsErr := efs.icd.CreateLink(parent, name, target)
+
+	if err := co.StartSend(); err != nil {
+		panic(err)
+	}
+
+	switch fse := fsErr.(type) {
+	case nil:
+		if ce == nil {
+			// TODO elaborate error description and handling by jdfc in this case
+			if err := co.SendObj(hbi.Repr(int(vfs.EEXIST))); err != nil {
+				panic(err)
+			}
+			return
+		}
+		if err := co.SendObj(`0`); err != nil {
+			panic(err)
+		}
+	case syscall.Errno:
+		if err := co.SendObj(hbi.Repr(int(fse))); err != nil {
+			panic(err)
+		}
+		return
+	default:
+		panic(fsErr)
+	}
+
+	bufView := ((*[unsafe.Sizeof(*ce)]byte)(unsafe.Pointer(ce)))[0:unsafe.Sizeof(*ce)]
+	if err := co.SendData(bufView); err != nil {
+		panic(err)
+	}
+}
