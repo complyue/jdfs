@@ -45,8 +45,8 @@ type icInode struct {
 	children []InodeID
 }
 
-// handle to an inode held open
-type handle struct {
+// in-core handle to an inode held open
+type icHandle struct {
 	ino InodeID
 	f   *os.File
 }
@@ -75,8 +75,8 @@ type icFSD struct {
 	freeInoIdxs []int           // free list of indices into stoInodes
 
 	// registry of handles held open, a handle value is index into openHandles
-	stoHandles  []handle // flat storage of handles
-	freeHdlIdxs []int    // free list of indices into stoHandles
+	stoHandles  []icHandle // flat storage of handles
+	freeHdlIdxs []int      // free list of indices into stoHandles
 
 	// guard access to session data structs
 	mu sync.Mutex
@@ -106,10 +106,12 @@ func (icd *icFSD) init(rootPath string, readOnly bool) error {
 		icd.rootDevice = inode.dev
 		icd.rootInode = inode.inode
 
+		// todo sophisticate initial in-core data allocation,
+		// may base on statistics from local fs and config.
 		icd.regInode = make(map[InodeID]int)
 		icd.stoInodes = nil
 		icd.freeInoIdxs = nil
-		icd.stoHandles = nil
+		icd.stoHandles = []icHandle{icHandle{}} // reserve 0 for nil handle
 		icd.freeHdlIdxs = nil
 
 		ici := icd.loadInode(fi, "/")
@@ -467,6 +469,67 @@ func (icd *icFSD) MkDir(parent InodeID, name string, mode uint32) (ce *vfs.Child
 
 				ici.children = append(ici.children, cici.inode)
 			}
+		}
+
+	}) {
+		glog.Warningf("inode [%v] lost", ici.inode)
+		fsErr = vfs.ENOENT
+	}
+
+	return
+}
+
+func (icd *icFSD) CreateFile(parent InodeID, name string, mode uint32) (
+	ce *vfs.ChildInodeEntry, handle vfs.HandleID, fsErr error) {
+	icd.mu.Lock()
+	defer icd.mu.Unlock()
+
+	isi, ok := icd.regInode[parent]
+	if !ok {
+		panic(errors.Errorf("parent inode [%v] not in-core ?!", parent))
+	}
+	ici := &icd.stoInodes[isi]
+
+	if !ici.reloadInode(icd, true, func(parentPath string, parentDir *os.File, parentFI os.FileInfo) {
+		childPath := fmt.Sprintf("%s/%s", parentPath, name)
+		var cF *os.File
+		var cici *icInode
+		cF, fsErr = os.OpenFile(
+			childPath,
+			os.O_CREATE|os.O_EXCL, os.FileMode(mode),
+		)
+		if fsErr != nil {
+			return
+		}
+		if cFI, fsErr := cF.Stat(); fsErr != nil {
+			return
+		} else {
+			cici = icd.loadInode(cFI, childPath)
+		}
+
+		ici.children = append(ici.children, cici.inode)
+
+		var hsi int
+		if nFreeHdls := len(icd.freeHdlIdxs); nFreeHdls > 0 {
+			hsi = icd.freeHdlIdxs[nFreeHdls-1]
+			icd.freeHdlIdxs = icd.freeHdlIdxs[:nFreeHdls-1]
+			icd.stoHandles[hsi] = icHandle{
+				ino: cici.inode, f: cF,
+			}
+		} else {
+			hsi = len(icd.stoHandles)
+			icd.stoHandles = append(icd.stoHandles, icHandle{
+				ino: cici.inode, f: cF,
+			})
+		}
+		handle = vfs.HandleID(hsi)
+
+		ce = &vfs.ChildInodeEntry{
+			Child:                cici.inode,
+			Generation:           0,
+			Attributes:           cici.attrs,
+			AttributesExpiration: time.Now().Add(vfs.META_ATTRS_CACHE_TIME),
+			EntryExpiration:      time.Now().Add(vfs.DIR_CHILDREN_CACHE_TIME),
 		}
 
 	}) {

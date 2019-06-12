@@ -379,7 +379,47 @@ func (fs *fileSystem) MkNode(
 func (fs *fileSystem) CreateFile(
 	ctx context.Context,
 	op *vfs.CreateFileOp) (err error) {
-	err = vfs.ENOSYS
+	co, err := fs.po.NewCo()
+	if err != nil {
+		return err
+	}
+	defer co.Close()
+
+	if err = co.SendCode(fmt.Sprintf(`
+CreateFile(%#v, %#v, %#v)
+`, op.Parent, op.Name, uint32(op.Mode))); err != nil {
+		panic(err)
+	}
+
+	if err = co.StartRecv(); err != nil {
+		return err
+	}
+
+	errno, err := co.RecvObj()
+	if err != nil {
+		return err
+	}
+	if en, ok := errno.(hbi.LitIntType); !ok {
+		panic(errors.Errorf("unexpected errno type [%T] of errno value [%v]", errno, errno))
+	} else if en != 0 {
+		return syscall.Errno(en)
+	}
+
+	handle, err := co.RecvObj()
+	if err != nil {
+		return err
+	}
+	if handle, ok := handle.(hbi.LitIntType); !ok {
+		panic(errors.Errorf("unexpected handle type [%T] of handle value [%v]", handle, handle))
+	} else {
+		op.Handle = vfs.HandleID(handle)
+	}
+
+	bufView := ((*[unsafe.Sizeof(op.Entry)]byte)(unsafe.Pointer(&op.Entry)))[:unsafe.Sizeof(op.Entry)]
+	if err = co.RecvData(bufView); err != nil {
+		return err
+	}
+
 	return
 }
 
