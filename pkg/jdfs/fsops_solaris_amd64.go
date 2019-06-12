@@ -21,7 +21,7 @@ func ts2t(ts syscall.Timespec) time.Time {
 	return time.Unix(ts.Sec, ts.Nsec)
 }
 
-func fi2in(fi os.FileInfo) iMeta {
+func fi2im(fi os.FileInfo) iMeta {
 	sd, ok := fi.Sys().(*syscall.Stat_t)
 	if !ok {
 		panic(errors.Errorf("Incompatible local file: [%s]", fi.Name))

@@ -93,11 +93,12 @@ func (icd *icFSD) init(rootPath string, readOnly bool) error {
 	if err != nil {
 		return errors.Errorf("Bad JDFS server path: [%s]", rootPath)
 	}
+	// TODO use .Stat() means following symlinks, is this okay ?
 	if fi, err := rootDir.Stat(); err != nil || !fi.IsDir() {
 		return errors.Errorf("Invalid JDFS server path: [%s]", rootPath)
 	} else {
 
-		inode := fi2in(fi)
+		inode := fi2im(fi)
 
 		icd.mu.Lock()
 		defer icd.mu.Unlock()
@@ -126,7 +127,7 @@ func (icd *icFSD) init(rootPath string, readOnly bool) error {
 
 // must have icd.mu locked
 func (icd *icFSD) loadInode(fi os.FileInfo, jdfPath string) (ici *icInode) {
-	inode := fi2in(fi)
+	inode := fi2im(fi)
 
 	if inode.dev != icd.rootDevice {
 		glog.Warningf("Nested mount point [%s] under [%s] not supported by JDFS.",
@@ -246,20 +247,31 @@ func (ici *icInode) reloadInode(icd *icFSD, forWrite bool, withFile func(path st
 		// JDFS server process has mounted root dir as pwd, so can just open jdfPath
 		if inoF != nil {
 			inoF.Close()
+			inoF = nil
 		}
+		if inoFI, err = os.Lstat(inoPath); err != nil {
+			glog.Warningf("JDFS [%s]:[%s] disappeared - %+v", icd.rootDir.Name(), inoPath, err)
+			continue
+		} else if (inoFI.Mode() & os.ModeSymlink) != 0 {
+			// reload a symlink
+			// TODO proceed to open a symlink is okay ?
+		} else if !inoFI.Mode().IsRegular() {
+			// TODO handle other non-regular file cases
+			panic(errors.Errorf("unexpected file mode [%v] of [%s]:[%s]", inoFI.Mode(), icd.rootDir.Name(), inoPath))
+		}
+
+		if im = fi2im(inoFI); im.inode != ici.inode {
+			glog.Warningf("JDFS [%s]:[%s] is inode [%v] instead of [%v] now.",
+				icd.rootDir.Name(), inoPath, im.inode, ici.inode)
+			continue
+		}
+
 		inoF, err = os.OpenFile(inoPath, openFlags, 0)
 		if err != nil {
 			glog.Warningf("JDFS [%s]:[%s] no longer be inode [%v] - %+v",
 				icd.rootDir.Name(), inoPath, ici.inode, err)
 			inoF = nil
 			continue
-		}
-		if inoFI, err = inoF.Stat(); err == nil {
-			if im = fi2in(inoFI); im.inode != ici.inode {
-				glog.Warningf("JDFS [%s]:[%s] is inode [%v] instead of [%v] now.",
-					icd.rootDir.Name(), inoPath, im.inode, ici.inode)
-				continue
-			}
 		}
 		break // got inoF of same inode
 	}
@@ -408,11 +420,11 @@ func (icd *icFSD) SetInodeAttributes(inode InodeID,
 		}
 
 		// stat local fs for new meta attrs
-		inoFI, err := inoF.Stat()
+		inoFI, err := os.Lstat(inoPath)
 		if err != nil {
 			panic(err)
 		}
-		im := fi2in(inoFI)
+		im := fi2im(inoFI)
 		if im.inode != ici.inode {
 			panic("inode changed ?!")
 		}
@@ -530,6 +542,59 @@ func (icd *icFSD) CreateFile(parent InodeID, name string, mode uint32) (
 			Attributes:           cici.attrs,
 			AttributesExpiration: time.Now().Add(vfs.META_ATTRS_CACHE_TIME),
 			EntryExpiration:      time.Now().Add(vfs.DIR_CHILDREN_CACHE_TIME),
+		}
+
+	}) {
+		glog.Warningf("inode [%v] lost", ici.inode)
+		fsErr = vfs.ENOENT
+	}
+
+	return
+}
+
+func (icd *icFSD) CreateSymlink(parent InodeID, name string, target string) (ce *vfs.ChildInodeEntry, fsErr error) {
+	icd.mu.Lock()
+	defer icd.mu.Unlock()
+
+	isi, ok := icd.regInode[parent]
+	if !ok {
+		panic(errors.Errorf("parent inode [%v] not in-core ?!", parent))
+	}
+	ici := &icd.stoInodes[isi]
+
+	if !ici.reloadInode(icd, true, func(parentPath string, parentDir *os.File, parentFI os.FileInfo) {
+		if fsErr = os.Symlink(target, fmt.Sprintf("%s/%s", parentPath, name)); fsErr != nil {
+			return
+		}
+
+		if ici.children != nil { // clear content, keep capacity
+			ici.children = ici.children[:0]
+		}
+		cFIs, err := parentDir.Readdir(0)
+		if err != nil {
+			panic(err)
+		} else {
+			for _, cfi := range cFIs {
+
+				cici := icd.loadInode(cfi, fmt.Sprintf("%s/%s", parentPath, cfi.Name()))
+
+				if cici == nil { // most prolly a nested mount point
+					// keep it invisible to JDFS client
+					continue
+				}
+
+				if cfi.Name() == name {
+					ce = &vfs.ChildInodeEntry{
+						Child:                cici.iMeta.inode,
+						Generation:           0,
+						Attributes:           cici.iMeta.attrs,
+						AttributesExpiration: time.Now().Add(vfs.META_ATTRS_CACHE_TIME),
+						EntryExpiration:      time.Now().Add(vfs.DIR_CHILDREN_CACHE_TIME),
+					}
+				}
+
+				ici.children = append(ici.children, cici.inode)
+			}
 		}
 
 	}) {

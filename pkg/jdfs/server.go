@@ -51,7 +51,7 @@ type exportedFileSystem struct {
 func (efs *exportedFileSystem) NamesToExpose() []string {
 	return []string{
 		"Mount", "StatFS", "LookUpInode", "GetInodeAttributes", "SetInodeAttributes", "ForgetInode",
-		"MkDir", "CreateFile",
+		"MkDir", "CreateFile", "CreateSymlink",
 	}
 }
 
@@ -292,6 +292,46 @@ func (efs *exportedFileSystem) CreateFile(parent InodeID, name string, mode uint
 
 	if err := co.SendObj(hbi.Repr(int(handle))); err != nil {
 		panic(err)
+	}
+
+	bufView := ((*[unsafe.Sizeof(*ce)]byte)(unsafe.Pointer(ce)))[0:unsafe.Sizeof(*ce)]
+	if err := co.SendData(bufView); err != nil {
+		panic(err)
+	}
+}
+
+func (efs *exportedFileSystem) CreateSymlink(parent InodeID, name string, target string) {
+	co := efs.ho.Co()
+
+	if err := co.FinishRecv(); err != nil {
+		panic(err)
+	}
+
+	ce, fsErr := efs.icd.CreateSymlink(parent, name, target)
+
+	if err := co.StartSend(); err != nil {
+		panic(err)
+	}
+
+	switch fse := fsErr.(type) {
+	case nil:
+		if ce == nil {
+			// TODO elaborate error description and handling by jdfc in this case
+			if err := co.SendObj(hbi.Repr(int(vfs.EEXIST))); err != nil {
+				panic(err)
+			}
+			return
+		}
+		if err := co.SendObj(`0`); err != nil {
+			panic(err)
+		}
+	case syscall.Errno:
+		if err := co.SendObj(hbi.Repr(int(fse))); err != nil {
+			panic(err)
+		}
+		return
+	default:
+		panic(fsErr)
 	}
 
 	bufView := ((*[unsafe.Sizeof(*ce)]byte)(unsafe.Pointer(ce)))[0:unsafe.Sizeof(*ce)]
