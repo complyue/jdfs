@@ -500,7 +500,32 @@ CreateLink(%#v, %#v, %#v)
 func (fs *fileSystem) Rename(
 	ctx context.Context,
 	op *vfs.RenameOp) (err error) {
-	err = vfs.ENOSYS
+	co, err := fs.po.NewCo()
+	if err != nil {
+		return err
+	}
+	defer co.Close()
+
+	if err = co.SendCode(fmt.Sprintf(`
+Rename(%#v, %#v, %#v, %#v)
+`, op.OldParent, op.OldName, op.NewParent, op.NewName)); err != nil {
+		panic(err)
+	}
+
+	if err = co.StartRecv(); err != nil {
+		return err
+	}
+
+	errno, err := co.RecvObj()
+	if err != nil {
+		return err
+	}
+	if en, ok := errno.(hbi.LitIntType); !ok {
+		panic(errors.Errorf("unexpected errno type [%T] of errno value [%v]", errno, errno))
+	} else if en != 0 {
+		return syscall.Errno(en)
+	}
+
 	return
 }
 

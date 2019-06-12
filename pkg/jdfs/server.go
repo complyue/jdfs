@@ -379,3 +379,31 @@ func (efs *exportedFileSystem) CreateLink(parent InodeID, name string, target In
 		panic(err)
 	}
 }
+
+func (efs *exportedFileSystem) Rename(oldParent InodeID, oldName string, newParent InodeID, newName string) {
+	co := efs.ho.Co()
+
+	if err := co.FinishRecv(); err != nil {
+		panic(err)
+	}
+
+	fsErr := efs.icd.Rename(oldParent, oldName, newParent, newName)
+
+	if err := co.StartSend(); err != nil {
+		panic(err)
+	}
+
+	switch fse := fsErr.(type) {
+	case nil:
+		if err := co.SendObj(`0`); err != nil {
+			panic(err)
+		}
+	case syscall.Errno:
+		if err := co.SendObj(hbi.Repr(int(fse))); err != nil {
+			panic(err)
+		}
+		return
+	default:
+		panic(fsErr)
+	}
+}

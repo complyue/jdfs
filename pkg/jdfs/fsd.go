@@ -254,7 +254,6 @@ func (ici *icInode) reloadInode(icd *icFSD, forWrite bool, withFile func(path st
 			continue
 		} else if (inoFI.Mode() & os.ModeSymlink) != 0 {
 			// reload a symlink
-			// TODO proceed to open a symlink is okay ?
 		} else if !inoFI.Mode().IsRegular() {
 			// TODO handle other non-regular file cases
 			panic(errors.Errorf("unexpected file mode [%v] of [%s]:[%s]", inoFI.Mode(), icd.rootDir.Name(), inoPath))
@@ -679,6 +678,44 @@ func (icd *icFSD) CreateLink(parent InodeID, name string, target InodeID) (ce *v
 		}
 	}) {
 		glog.Warningf("inode [%v] lost", ici.inode)
+		fsErr = vfs.ENOENT
+	}
+
+	return
+}
+
+func (icd *icFSD) Rename(oldParent InodeID, oldName string, newParent InodeID, newName string) (fsErr error) {
+	icd.mu.Lock()
+	defer icd.mu.Unlock()
+
+	isiOldDir, ok := icd.regInode[oldParent]
+	if !ok {
+		panic(errors.Errorf("parent inode [%v] not in-core ?!", oldParent))
+	}
+	iciOldDir := &icd.stoInodes[isiOldDir]
+
+	isiNewDir, ok := icd.regInode[oldParent]
+	if !ok {
+		panic(errors.Errorf("parent inode [%v] not in-core ?!", oldParent))
+	}
+	iciNewDir := &icd.stoInodes[isiNewDir]
+
+	if !iciOldDir.reloadInode(icd, true, func(oldPath string, oldDir *os.File, oldFI os.FileInfo) {
+		if !iciNewDir.reloadInode(icd, true, func(newPath string, newDir *os.File, newFI os.FileInfo) {
+
+			if fsErr = os.Rename(
+				fmt.Sprintf("%s/%s", oldPath, oldName),
+				fmt.Sprintf("%s/%s", newPath, newName),
+			); fsErr != nil {
+				return
+			}
+
+		}) {
+			glog.Warningf("inode [%v] lost", iciNewDir.inode)
+			fsErr = vfs.ENOENT
+		}
+	}) {
+		glog.Warningf("inode [%v] lost", iciOldDir.inode)
 		fsErr = vfs.ENOENT
 	}
 
