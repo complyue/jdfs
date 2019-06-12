@@ -463,3 +463,35 @@ func (efs *exportedFileSystem) Unlink(parent InodeID, name string) {
 		panic(fsErr)
 	}
 }
+
+func (efs *exportedFileSystem) OpenDir(inode InodeID) {
+	co := efs.ho.Co()
+
+	if err := co.FinishRecv(); err != nil {
+		panic(err)
+	}
+
+	handle, fsErr := efs.icd.OpenDir(inode)
+
+	if err := co.StartSend(); err != nil {
+		panic(err)
+	}
+
+	switch fse := fsErr.(type) {
+	case nil:
+		if err := co.SendObj(`0`); err != nil {
+			panic(err)
+		}
+	case syscall.Errno:
+		if err := co.SendObj(hbi.Repr(int(fse))); err != nil {
+			panic(err)
+		}
+		return
+	default:
+		panic(fsErr)
+	}
+
+	if err := co.SendObj(hbi.Repr(int(handle))); err != nil {
+		panic(err)
+	}
+}

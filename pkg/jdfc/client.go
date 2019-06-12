@@ -596,7 +596,42 @@ Unlink(%#v, %#v)
 func (fs *fileSystem) OpenDir(
 	ctx context.Context,
 	op *vfs.OpenDirOp) (err error) {
-	err = vfs.ENOSYS
+	co, err := fs.po.NewCo()
+	if err != nil {
+		return err
+	}
+	defer co.Close()
+
+	if err = co.SendCode(fmt.Sprintf(`
+OpenDir(%#v)
+`, op.Inode)); err != nil {
+		panic(err)
+	}
+
+	if err = co.StartRecv(); err != nil {
+		return err
+	}
+
+	errno, err := co.RecvObj()
+	if err != nil {
+		return err
+	}
+	if en, ok := errno.(hbi.LitIntType); !ok {
+		panic(errors.Errorf("unexpected errno type [%T] of errno value [%v]", errno, errno))
+	} else if en != 0 {
+		return syscall.Errno(en)
+	}
+
+	handle, err := co.RecvObj()
+	if err != nil {
+		return err
+	}
+	if handle, ok := handle.(hbi.LitIntType); !ok {
+		panic(errors.Errorf("unexpected handle type [%T] of handle value [%v]", handle, handle))
+	} else {
+		op.Handle = vfs.HandleID(handle)
+	}
+
 	return
 }
 

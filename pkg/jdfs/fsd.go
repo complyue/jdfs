@@ -228,16 +228,21 @@ func (icd *icFSD) getInode(inode InodeID) *icInode {
 }
 
 // must have icd.mu locked
-func (ici *icInode) reloadInode(icd *icFSD, forWrite bool, withFile func(path string, f *os.File, fi os.FileInfo)) bool {
+func (ici *icInode) reloadInode(icd *icFSD, forWrite bool,
+	withF func(path string, f *os.File, fi os.FileInfo) (keepF bool),
+) bool {
 	openFlags := os.O_RDONLY
 	if forWrite {
 		openFlags = os.O_RDWR
 	}
-	var err error
-	var inoPath string
-	var inoF *os.File
+	var (
+		err     error
+		inoPath string
+		inoF    *os.File
+		keepF   = false
+	)
 	defer func() {
-		if inoF != nil {
+		if inoF != nil && !keepF {
 			inoF.Close()
 		}
 	}()
@@ -283,8 +288,8 @@ func (ici *icInode) reloadInode(icd *icFSD, forWrite bool, withFile func(path st
 	ici.attrs = im.attrs
 	ici.lastChecked = time.Now()
 
-	if withFile != nil {
-		withFile(inoPath, inoF, inoFI)
+	if withF != nil {
+		keepF = withF(inoPath, inoF, inoFI)
 	}
 
 	return true
@@ -292,7 +297,7 @@ func (ici *icInode) reloadInode(icd *icFSD, forWrite bool, withFile func(path st
 
 // must have icd.mu locked
 func (ici *icInode) refreshChildren(icd *icFSD, lookUpName string) (reloaded bool, matchedChild *icInode) {
-	reloaded = ici.reloadInode(icd, false, func(parentPath string, parentDir *os.File, parentFI os.FileInfo) {
+	reloaded = ici.reloadInode(icd, false, func(parentPath string, parentDir *os.File, parentFI os.FileInfo) (keepF bool) {
 
 		if parentDir == nil || !parentFI.IsDir() {
 			// not a dir anymore
@@ -326,6 +331,7 @@ func (ici *icInode) refreshChildren(icd *icFSD, lookUpName string) (reloaded boo
 			}
 		}
 
+		return
 	})
 	return
 }
@@ -402,7 +408,7 @@ func (icd *icFSD) SetInodeAttributes(inode InodeID,
 	defer icd.mu.Unlock()
 
 	ici := icd.getInode(inode)
-	if !ici.reloadInode(icd, true, func(inoPath string, inoF *os.File, inoFI os.FileInfo) {
+	if !ici.reloadInode(icd, true, func(inoPath string, inoF *os.File, inoFI os.FileInfo) (keepF bool) {
 
 		if chgSize {
 			if err := inoF.Truncate(int64(sz)); err != nil {
@@ -434,6 +440,7 @@ func (icd *icFSD) SetInodeAttributes(inode InodeID,
 		ici.attrs = im.attrs
 		ici.lastChecked = time.Now()
 
+		return
 	}) {
 		panic(errors.Errorf("inode [%v] lost", ici.inode))
 	}
@@ -451,7 +458,7 @@ func (icd *icFSD) MkDir(parent InodeID, name string, mode uint32) (ce *vfs.Child
 	}
 	ici := &icd.stoInodes[isi]
 
-	if !ici.reloadInode(icd, true, func(parentPath string, parentDir *os.File, parentFI os.FileInfo) {
+	if !ici.reloadInode(icd, true, func(parentPath string, parentDir *os.File, parentFI os.FileInfo) (keepF bool) {
 
 		if fsErr = os.Mkdir(fmt.Sprintf("%s/%s", parentPath, name), os.FileMode(mode)); fsErr != nil {
 			return
@@ -490,6 +497,7 @@ func (icd *icFSD) MkDir(parent InodeID, name string, mode uint32) (ce *vfs.Child
 			}
 		}
 
+		return
 	}) {
 		glog.Warningf("inode [%v] lost", ici.inode)
 		fsErr = vfs.ENOENT
@@ -509,7 +517,7 @@ func (icd *icFSD) CreateFile(parent InodeID, name string, mode uint32) (
 	}
 	ici := &icd.stoInodes[isi]
 
-	if !ici.reloadInode(icd, true, func(parentPath string, parentDir *os.File, parentFI os.FileInfo) {
+	if !ici.reloadInode(icd, true, func(parentPath string, parentDir *os.File, parentFI os.FileInfo) (keepF bool) {
 
 		childPath := fmt.Sprintf("%s/%s", parentPath, name)
 		var cF *os.File
@@ -552,6 +560,7 @@ func (icd *icFSD) CreateFile(parent InodeID, name string, mode uint32) (
 			EntryExpiration:      time.Now().Add(vfs.DIR_CHILDREN_CACHE_TIME),
 		}
 
+		return
 	}) {
 		glog.Warningf("inode [%v] lost", ici.inode)
 		fsErr = vfs.ENOENT
@@ -570,7 +579,7 @@ func (icd *icFSD) CreateSymlink(parent InodeID, name string, target string) (ce 
 	}
 	ici := &icd.stoInodes[isi]
 
-	if !ici.reloadInode(icd, true, func(parentPath string, parentDir *os.File, parentFI os.FileInfo) {
+	if !ici.reloadInode(icd, true, func(parentPath string, parentDir *os.File, parentFI os.FileInfo) (keepF bool) {
 
 		if fsErr = os.Symlink(target, fmt.Sprintf("%s/%s", parentPath, name)); fsErr != nil {
 			return
@@ -609,6 +618,7 @@ func (icd *icFSD) CreateSymlink(parent InodeID, name string, target string) (ce 
 			}
 		}
 
+		return
 	}) {
 		glog.Warningf("inode [%v] lost", ici.inode)
 		fsErr = vfs.ENOENT
@@ -633,8 +643,8 @@ func (icd *icFSD) CreateLink(parent InodeID, name string, target InodeID) (ce *v
 	}
 	iciTarget := &icd.stoInodes[isiTarget]
 
-	if !ici.reloadInode(icd, true, func(parentPath string, parentDir *os.File, parentFI os.FileInfo) {
-		if !iciTarget.reloadInode(icd, false, func(targetPath string, targetDir *os.File, targetFI os.FileInfo) {
+	if !ici.reloadInode(icd, true, func(parentPath string, parentDir *os.File, parentFI os.FileInfo) (keepF bool) {
+		if !iciTarget.reloadInode(icd, false, func(targetPath string, targetDir *os.File, targetFI os.FileInfo) (keepF bool) {
 
 			if fsErr = os.Link(targetPath, fmt.Sprintf("%s/%s", parentPath, name)); fsErr != nil {
 				return
@@ -673,10 +683,12 @@ func (icd *icFSD) CreateLink(parent InodeID, name string, target InodeID) (ce *v
 				}
 			}
 
+			return
 		}) {
 			glog.Warningf("inode [%v] lost", iciTarget.inode)
 			fsErr = vfs.ENOENT
 		}
+		return
 	}) {
 		glog.Warningf("inode [%v] lost", ici.inode)
 		fsErr = vfs.ENOENT
@@ -701,8 +713,8 @@ func (icd *icFSD) Rename(oldParent InodeID, oldName string, newParent InodeID, n
 	}
 	iciNewDir := &icd.stoInodes[isiNewDir]
 
-	if !iciOldDir.reloadInode(icd, true, func(oldPath string, oldDir *os.File, oldFI os.FileInfo) {
-		if !iciNewDir.reloadInode(icd, true, func(newPath string, newDir *os.File, newFI os.FileInfo) {
+	if !iciOldDir.reloadInode(icd, true, func(oldPath string, oldDir *os.File, oldFI os.FileInfo) (keepF bool) {
+		if !iciNewDir.reloadInode(icd, true, func(newPath string, newDir *os.File, newFI os.FileInfo) (keepF bool) {
 
 			if fsErr = os.Rename(
 				fmt.Sprintf("%s/%s", oldPath, oldName),
@@ -711,10 +723,12 @@ func (icd *icFSD) Rename(oldParent InodeID, oldName string, newParent InodeID, n
 				return
 			}
 
+			return
 		}) {
 			glog.Warningf("inode [%v] lost", iciNewDir.inode)
 			fsErr = vfs.ENOENT
 		}
+		return
 	}) {
 		glog.Warningf("inode [%v] lost", iciOldDir.inode)
 		fsErr = vfs.ENOENT
@@ -733,7 +747,7 @@ func (icd *icFSD) RmDir(parent InodeID, name string) (fsErr error) {
 	}
 	ici := &icd.stoInodes[isi]
 
-	if !ici.reloadInode(icd, true, func(parentPath string, parentDir *os.File, parentFI os.FileInfo) {
+	if !ici.reloadInode(icd, true, func(parentPath string, parentDir *os.File, parentFI os.FileInfo) (keepF bool) {
 
 		if fsErr = syscall.Rmdir(fmt.Sprintf("%s/%s", parentPath, name)); fsErr != nil {
 			return
@@ -741,6 +755,7 @@ func (icd *icFSD) RmDir(parent InodeID, name string) (fsErr error) {
 
 		ici.children = nil // invalidate child list
 
+		return
 	}) {
 		glog.Warningf("inode [%v] lost", ici.inode)
 		fsErr = vfs.ENOENT
@@ -759,7 +774,7 @@ func (icd *icFSD) Unlink(parent InodeID, name string) (fsErr error) {
 	}
 	ici := &icd.stoInodes[isi]
 
-	if !ici.reloadInode(icd, true, func(parentPath string, parentDir *os.File, parentFI os.FileInfo) {
+	if !ici.reloadInode(icd, true, func(parentPath string, parentDir *os.File, parentFI os.FileInfo) (keepF bool) {
 
 		if fsErr = syscall.Unlink(fmt.Sprintf("%s/%s", parentPath, name)); fsErr != nil {
 			return
@@ -767,6 +782,45 @@ func (icd *icFSD) Unlink(parent InodeID, name string) (fsErr error) {
 
 		ici.children = nil // invalidate child list
 
+		return
+	}) {
+		glog.Warningf("inode [%v] lost", ici.inode)
+		fsErr = vfs.ENOENT
+	}
+
+	return
+}
+
+func (icd *icFSD) OpenDir(inode InodeID) (handle vfs.HandleID, fsErr error) {
+	icd.mu.Lock()
+	defer icd.mu.Unlock()
+
+	isi, ok := icd.regInode[inode]
+	if !ok {
+		panic(errors.Errorf("inode [%v] not in-core ?!", inode))
+	}
+	ici := &icd.stoInodes[isi]
+
+	if !ici.reloadInode(icd, false, func(inoPath string, inoF *os.File, inoFI os.FileInfo) (keepF bool) {
+
+		var hsi int
+		if nFreeHdls := len(icd.freeHdlIdxs); nFreeHdls > 0 {
+			hsi = icd.freeHdlIdxs[nFreeHdls-1]
+			icd.freeHdlIdxs = icd.freeHdlIdxs[:nFreeHdls-1]
+			icd.stoHandles[hsi] = icHandle{
+				ino: ici.inode, f: inoF,
+			}
+		} else {
+			hsi = len(icd.stoHandles)
+			icd.stoHandles = append(icd.stoHandles, icHandle{
+				ino: ici.inode, f: inoF,
+			})
+		}
+		handle = vfs.HandleID(hsi)
+
+		keepF = true
+
+		return
 	}) {
 		glog.Warningf("inode [%v] lost", ici.inode)
 		fsErr = vfs.ENOENT
