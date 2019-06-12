@@ -51,7 +51,7 @@ type exportedFileSystem struct {
 func (efs *exportedFileSystem) NamesToExpose() []string {
 	return []string{
 		"Mount", "StatFS", "LookUpInode", "GetInodeAttributes", "SetInodeAttributes", "ForgetInode",
-		"MkDir", "CreateFile", "CreateSymlink",
+		"MkDir", "CreateFile", "CreateSymlink", "CreateLink", "Rename", "RmDir", "Unlink",
 	}
 }
 
@@ -388,6 +388,62 @@ func (efs *exportedFileSystem) Rename(oldParent InodeID, oldName string, newPare
 	}
 
 	fsErr := efs.icd.Rename(oldParent, oldName, newParent, newName)
+
+	if err := co.StartSend(); err != nil {
+		panic(err)
+	}
+
+	switch fse := fsErr.(type) {
+	case nil:
+		if err := co.SendObj(`0`); err != nil {
+			panic(err)
+		}
+	case syscall.Errno:
+		if err := co.SendObj(hbi.Repr(int(fse))); err != nil {
+			panic(err)
+		}
+		return
+	default:
+		panic(fsErr)
+	}
+}
+
+func (efs *exportedFileSystem) RmDir(parent InodeID, name string) {
+	co := efs.ho.Co()
+
+	if err := co.FinishRecv(); err != nil {
+		panic(err)
+	}
+
+	fsErr := efs.icd.RmDir(parent, name)
+
+	if err := co.StartSend(); err != nil {
+		panic(err)
+	}
+
+	switch fse := fsErr.(type) {
+	case nil:
+		if err := co.SendObj(`0`); err != nil {
+			panic(err)
+		}
+	case syscall.Errno:
+		if err := co.SendObj(hbi.Repr(int(fse))); err != nil {
+			panic(err)
+		}
+		return
+	default:
+		panic(fsErr)
+	}
+}
+
+func (efs *exportedFileSystem) Unlink(parent InodeID, name string) {
+	co := efs.ho.Co()
+
+	if err := co.FinishRecv(); err != nil {
+		panic(err)
+	}
+
+	fsErr := efs.icd.Unlink(parent, name)
 
 	if err := co.StartSend(); err != nil {
 		panic(err)

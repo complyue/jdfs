@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/complyue/jdfs/pkg/errors"
@@ -716,6 +717,58 @@ func (icd *icFSD) Rename(oldParent InodeID, oldName string, newParent InodeID, n
 		}
 	}) {
 		glog.Warningf("inode [%v] lost", iciOldDir.inode)
+		fsErr = vfs.ENOENT
+	}
+
+	return
+}
+
+func (icd *icFSD) RmDir(parent InodeID, name string) (fsErr error) {
+	icd.mu.Lock()
+	defer icd.mu.Unlock()
+
+	isi, ok := icd.regInode[parent]
+	if !ok {
+		panic(errors.Errorf("parent inode [%v] not in-core ?!", parent))
+	}
+	ici := &icd.stoInodes[isi]
+
+	if !ici.reloadInode(icd, true, func(parentPath string, parentDir *os.File, parentFI os.FileInfo) {
+
+		if fsErr = syscall.Rmdir(fmt.Sprintf("%s/%s", parentPath, name)); fsErr != nil {
+			return
+		}
+
+		ici.children = nil // invalidate child list
+
+	}) {
+		glog.Warningf("inode [%v] lost", ici.inode)
+		fsErr = vfs.ENOENT
+	}
+
+	return
+}
+
+func (icd *icFSD) Unlink(parent InodeID, name string) (fsErr error) {
+	icd.mu.Lock()
+	defer icd.mu.Unlock()
+
+	isi, ok := icd.regInode[parent]
+	if !ok {
+		panic(errors.Errorf("parent inode [%v] not in-core ?!", parent))
+	}
+	ici := &icd.stoInodes[isi]
+
+	if !ici.reloadInode(icd, true, func(parentPath string, parentDir *os.File, parentFI os.FileInfo) {
+
+		if fsErr = syscall.Unlink(fmt.Sprintf("%s/%s", parentPath, name)); fsErr != nil {
+			return
+		}
+
+		ici.children = nil // invalidate child list
+
+	}) {
+		glog.Warningf("inode [%v] lost", ici.inode)
 		fsErr = vfs.ENOENT
 	}
 
