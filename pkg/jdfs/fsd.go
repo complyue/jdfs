@@ -400,15 +400,26 @@ func (icd *icFSD) SetInodeAttributes(inode InodeID,
 		}
 
 		if chgMtime {
-
 			if err := chftimes(inoF, mNsec); err != nil {
 				panic(err)
 			}
-
 		}
+
+		// stat local fs for new meta attrs
+		inoFI, err := inoF.Stat()
+		if err != nil {
+			panic(err)
+		}
+		im := fi2in(inoFI)
+		if im.inode != ici.inode {
+			panic("inode changed ?!")
+		}
+		ici.attrs = im.attrs
+		ici.lastChecked = time.Now()
 
 	}) {
 		panic(errors.Errorf("inode [%v] lost", ici.inode))
 	}
+
 	return ici
 }
