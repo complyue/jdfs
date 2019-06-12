@@ -55,7 +55,7 @@ func (s *fileSystemServer) handleOp(
 	var err error
 	switch typed := op.(type) {
 	default:
-		err = fuse.ENOSYS
+		err = vfs.ENOSYS
 
 	case *vfs.StatFSOp:
 		err = s.fs.StatFS(ctx, typed)

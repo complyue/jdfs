@@ -4,6 +4,7 @@ package jdfs
 import (
 	"fmt"
 	"os"
+	"syscall"
 	"unsafe"
 
 	"github.com/complyue/hbi"
@@ -118,22 +119,26 @@ func (efs *exportedFileSystem) LookUpInode(parent InodeID, name string) {
 	if parent == vfs.RootInodeID { // translate FUSE root to actual root inode
 		parent = efs.icd.rootInode
 	}
-	ce := efs.icd.LookUpInode(parent, name)
+	ce, fsErr := efs.icd.LookUpInode(parent, name)
 
 	if err := co.StartSend(); err != nil {
 		panic(err)
 	}
 
-	if ce == nil {
+	switch fse := fsErr.(type) {
+	case nil:
 		if err := co.SendObj(`0`); err != nil {
 			panic(err)
 		}
+	case syscall.Errno:
+		if err := co.SendObj(hbi.Repr(int(fse))); err != nil {
+			panic(err)
+		}
 		return
+	default:
+		panic(fsErr)
 	}
 
-	if err := co.SendObj(`1`); err != nil {
-		panic(err)
-	}
 	bufView := ((*[unsafe.Sizeof(*ce)]byte)(unsafe.Pointer(ce)))[0:unsafe.Sizeof(*ce)]
 	if err := co.SendData(bufView); err != nil {
 		panic(err)
@@ -197,15 +202,55 @@ func (efs *exportedFileSystem) SetInodeAttributes(inode InodeID,
 }
 
 func (efs *exportedFileSystem) ForgetInode(inode InodeID, n int) {
+	if inode == vfs.RootInodeID || inode == efs.icd.rootInode {
+		return // never forget about root
+	}
+
 	co := efs.ho.Co()
 
 	if err := co.FinishRecv(); err != nil {
 		panic(err)
 	}
 
-	if inode == vfs.RootInodeID || inode == efs.icd.rootInode {
-		return // never forget about root
+	efs.icd.ForgetInode(inode, n)
+}
+
+func (efs *exportedFileSystem) MkDir(parent InodeID, name string, mode uint32) {
+	co := efs.ho.Co()
+
+	if err := co.FinishRecv(); err != nil {
+		panic(err)
 	}
 
-	efs.icd.ForgetInode(inode, n)
+	ce, fsErr := efs.icd.MkDir(parent, name, mode)
+
+	if err := co.StartSend(); err != nil {
+		panic(err)
+	}
+
+	switch fse := fsErr.(type) {
+	case nil:
+		if ce == nil {
+			// TODO elaborate error description and handling by jdfc in this case
+			if err := co.SendObj(hbi.Repr(int(vfs.EEXIST))); err != nil {
+				panic(err)
+			}
+			return
+		}
+		if err := co.SendObj(`0`); err != nil {
+			panic(err)
+		}
+	case syscall.Errno:
+		if err := co.SendObj(hbi.Repr(int(fse))); err != nil {
+			panic(err)
+		}
+		return
+	default:
+		panic(fsErr)
+	}
+
+	bufView := ((*[unsafe.Sizeof(*ce)]byte)(unsafe.Pointer(ce)))[0:unsafe.Sizeof(*ce)]
+	if err := co.SendData(bufView); err != nil {
+		panic(err)
+	}
 }

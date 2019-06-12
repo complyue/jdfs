@@ -335,7 +335,7 @@ func (icd *icFSD) FetchInode(inode InodeID) *vfs.InodeAttributes {
 	return &ici.attrs
 }
 
-func (icd *icFSD) LookUpInode(parent InodeID, name string) *vfs.ChildInodeEntry {
+func (icd *icFSD) LookUpInode(parent InodeID, name string) (*vfs.ChildInodeEntry, error) {
 	icd.mu.Lock()
 	defer icd.mu.Unlock()
 
@@ -351,7 +351,7 @@ func (icd *icFSD) LookUpInode(parent InodeID, name string) *vfs.ChildInodeEntry 
 		// reload children
 		reloaded, matchedChild = ici.refreshChildren(icd, name)
 		if !reloaded {
-			return nil
+			return nil, vfs.ENOENT
 		}
 	} else {
 		for _, cInode := range ici.children {
@@ -366,7 +366,7 @@ func (icd *icFSD) LookUpInode(parent InodeID, name string) *vfs.ChildInodeEntry 
 	}
 
 	if matchedChild == nil {
-		return nil
+		return nil, vfs.ENOENT
 	}
 	return &vfs.ChildInodeEntry{
 		Child:                matchedChild.iMeta.inode,
@@ -374,7 +374,7 @@ func (icd *icFSD) LookUpInode(parent InodeID, name string) *vfs.ChildInodeEntry 
 		Attributes:           matchedChild.iMeta.attrs,
 		AttributesExpiration: time.Now().Add(vfs.META_ATTRS_CACHE_TIME),
 		EntryExpiration:      time.Now().Add(vfs.DIR_CHILDREN_CACHE_TIME),
-	}
+	}, nil
 }
 
 func (icd *icFSD) SetInodeAttributes(inode InodeID,
@@ -422,4 +422,57 @@ func (icd *icFSD) SetInodeAttributes(inode InodeID,
 	}
 
 	return ici
+}
+
+func (icd *icFSD) MkDir(parent InodeID, name string, mode uint32) (ce *vfs.ChildInodeEntry, fsErr error) {
+	icd.mu.Lock()
+	defer icd.mu.Unlock()
+
+	isi, ok := icd.regInode[parent]
+	if !ok {
+		panic(errors.Errorf("parent inode [%v] not in-core ?!", parent))
+	}
+	ici := &icd.stoInodes[isi]
+
+	if !ici.reloadInode(icd, true, func(parentPath string, parentDir *os.File, parentFI os.FileInfo) {
+		if fsErr = os.Mkdir(fmt.Sprintf("%s/%s", parentPath, name), os.FileMode(mode)); fsErr != nil {
+			return
+		}
+
+		if ici.children != nil { // clear content, keep capacity
+			ici.children = ici.children[:0]
+		}
+		cFIs, err := parentDir.Readdir(0)
+		if err != nil {
+			panic(err)
+		} else {
+			for _, cfi := range cFIs {
+
+				cici := icd.loadInode(cfi, fmt.Sprintf("%s/%s", parentPath, cfi.Name()))
+
+				if cici == nil { // most prolly a nested mount point
+					// keep it invisible to JDFS client
+					continue
+				}
+
+				if cfi.Name() == name {
+					ce = &vfs.ChildInodeEntry{
+						Child:                cici.iMeta.inode,
+						Generation:           0,
+						Attributes:           cici.iMeta.attrs,
+						AttributesExpiration: time.Now().Add(vfs.META_ATTRS_CACHE_TIME),
+						EntryExpiration:      time.Now().Add(vfs.DIR_CHILDREN_CACHE_TIME),
+					}
+				}
+
+				ici.children = append(ici.children, cici.inode)
+			}
+		}
+
+	}) {
+		glog.Warningf("inode [%v] lost", ici.inode)
+		fsErr = vfs.ENOENT
+	}
+
+	return
 }
