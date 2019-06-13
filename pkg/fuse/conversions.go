@@ -258,8 +258,14 @@ func convertInMessage(
 		}
 
 	case OpOpen:
+		in := (*OpenIn)(inMsg.Consume(unsafe.Sizeof(OpenIn{})))
+		if in == nil {
+			err = errors.New("Corrupt OpOpen")
+			return
+		}
 		o = &OpenFileOp{
 			Inode: InodeID(inMsg.Header().Nodeid),
+			Flags: in.Flags,
 		}
 
 	case OpOpendir:
