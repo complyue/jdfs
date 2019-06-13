@@ -55,6 +55,7 @@ func (efs *exportedFileSystem) NamesToExpose() []string {
 	return []string{
 		"Mount", "StatFS", "LookUpInode", "GetInodeAttributes", "SetInodeAttributes", "ForgetInode",
 		"MkDir", "CreateFile", "CreateSymlink", "CreateLink", "Rename", "RmDir", "Unlink",
+		"OpenDir", "ReadDir", "ReleaseDirHandle",
 	}
 }
 
@@ -533,4 +534,14 @@ func (efs *exportedFileSystem) ReadDir(inode InodeID, handle int, offset int, bu
 			panic(err)
 		}
 	}
+}
+
+func (efs *exportedFileSystem) ReleaseDirHandle(handle int) {
+	co := efs.ho.Co()
+
+	if err := co.FinishRecv(); err != nil {
+		panic(err)
+	}
+
+	efs.icd.ReleaseDirHandle(handle)
 }

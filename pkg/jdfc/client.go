@@ -685,7 +685,18 @@ ReadDir(%#v, %#v, %#v, %#v)
 func (fs *fileSystem) ReleaseDirHandle(
 	ctx context.Context,
 	op *vfs.ReleaseDirHandleOp) (err error) {
-	err = vfs.ENOSYS
+	co, err := fs.po.NewCo()
+	if err != nil {
+		return err
+	}
+	defer co.Close()
+
+	if err = co.SendCode(fmt.Sprintf(`
+ReleaseDirHandle(%#v)
+`, op.Handle)); err != nil {
+		panic(err)
+	}
+
 	return
 }
 

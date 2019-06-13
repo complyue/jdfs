@@ -845,6 +845,9 @@ func (icd *icFSD) OpenDir(inode InodeID) (handle vfs.HandleID, err error) {
 }
 
 func (icd *icFSD) ReadDir(inode InodeID, handle int, offset int, buf []byte) (bytesRead int, err error) {
+	icd.mu.Lock()
+	defer icd.mu.Unlock()
+
 	icdh := &icd.dirHandles[handle]
 	ici := &icd.stoInodes[icdh.isi]
 	if ici.inode != inode {
@@ -861,4 +864,17 @@ func (icd *icFSD) ReadDir(inode InodeID, handle int, offset int, buf []byte) (by
 	}
 
 	return
+}
+
+func (icd *icFSD) ReleaseDirHandle(handle int) {
+	icd.mu.Lock()
+	defer icd.mu.Unlock()
+
+	if icd.dirHandles[handle].isi <= 0 {
+		panic(errors.New("releasing non-existing dir handle ?!"))
+	}
+
+	icd.dirHandles[handle] = icdHandle{} // reset fields to zero values
+
+	icd.freeDHIdxs = append(icd.freeDHIdxs, handle)
 }
