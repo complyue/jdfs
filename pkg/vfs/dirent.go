@@ -12,48 +12,46 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package jdfc
+package vfs
 
 import (
 	"syscall"
 	"unsafe"
-
-	"github.com/complyue/jdfs/pkg/vfs"
 )
 
-type DirentType uint32
+type DirEntType uint32
 
 const (
-	DT_Unknown   DirentType = 0
-	DT_Socket    DirentType = syscall.DT_SOCK
-	DT_Link      DirentType = syscall.DT_LNK
-	DT_File      DirentType = syscall.DT_REG
-	DT_Block     DirentType = syscall.DT_BLK
-	DT_Directory DirentType = syscall.DT_DIR
-	DT_Char      DirentType = syscall.DT_CHR
-	DT_FIFO      DirentType = syscall.DT_FIFO
+	DT_Unknown   DirEntType = 0
+	DT_Socket    DirEntType = syscall.DT_SOCK
+	DT_Link      DirEntType = syscall.DT_LNK
+	DT_File      DirEntType = syscall.DT_REG
+	DT_Block     DirEntType = syscall.DT_BLK
+	DT_Directory DirEntType = syscall.DT_DIR
+	DT_Char      DirEntType = syscall.DT_CHR
+	DT_FIFO      DirEntType = syscall.DT_FIFO
 )
 
 // A struct representing an entry within a directory file, describing a child.
-// See notes on fuse.ReadDirOp and on WriteDirent for details.
-type Dirent struct {
+// See notes on fuse.ReadDirOp and on WriteDirEnt for details.
+type DirEnt struct {
 	// The (opaque) offset within the directory file of the entry following this
 	// one. See notes on fuse.ReadDirOp.Offset for details.
-	Offset vfs.DirOffset
+	Offset DirOffset
 
 	// The inode of the child file or directory, and its name within the parent.
-	Inode vfs.InodeID
+	Inode InodeID
 	Name  string
 
 	// The type of the child. The zero value (DT_Unknown) is legal, but means
 	// that the kernel will need to call GetAttr when the type is needed.
-	Type DirentType
+	Type DirEntType
 }
 
-// Write the supplied directory entry intto the given buffer in the format
+// Write the supplied directory entry into the given buffer in the format
 // expected in fuse.ReadFileOp.Data, returning the number of bytes written.
 // Return zero if the entry would not fit.
-func WriteDirent(buf []byte, d Dirent) (n int) {
+func WriteDirEnt(buf []byte, d DirEnt) (n int) {
 	// We want to write bytes with the layout of fuse_dirent
 	// (http://goo.gl/BmFxob) in host order. The struct must be aligned according
 	// to FUSE_DIRENT_ALIGN (http://goo.gl/UziWvH), which dictates 8-byte

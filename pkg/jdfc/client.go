@@ -22,13 +22,13 @@ import (
 
 // MountJDFS mounts a remote JDFS filesystem directory (can be root path or sub
 // directory under the exported root), to a local mountpoint, then serves
-// fs operations over HBI connections between this JDFS client and the
-// JDFS server, to be established by jdfsConnector.
+// fs operations over HBI connections between this jdfc and the jdfs, to be
+// established by jdfsConnector.
 func MountJDFS(
 	jdfsConnector func(he *hbi.HostingEnv) (
 		po *hbi.PostingEnd, ho *hbi.HostingEnd, err error,
 	),
-	jdfsPath string,
+	jdfPath string,
 	mountpoint string,
 	cfg *fuse.MountConfig,
 ) (err error) {
@@ -41,11 +41,11 @@ func MountJDFS(
 			err = errors.RichError(e)
 		}
 		if err != nil {
-			glog.Errorf("Unexpected JDFS client error: %+v", err)
+			glog.Errorf("Unexpected jdfc error: %+v", err)
 		}
 		if po != nil && !po.Disconnected() {
 			if err != nil {
-				po.Disconnect(fmt.Sprintf("Unexpected JDFS client error: %+v", err), true)
+				po.Disconnect(fmt.Sprintf("Unexpected jdfc error: %+v", err), true)
 			} else {
 				po.Close()
 			}
@@ -54,7 +54,7 @@ func MountJDFS(
 
 	fs := &fileSystem{
 		readOnly: cfg.ReadOnly,
-		jdfsPath: jdfsPath,
+		jdfPath: jdfPath,
 	}
 	mfs, err := fuse.Mount(mountpoint, &fileSystemServer{fs: fs}, cfg)
 	if err != nil {
@@ -66,7 +66,7 @@ func MountJDFS(
 		return
 	}
 
-	// prepare the hosting environment to be reacting to JDFS server
+	// prepare the hosting environment to be reacting to jdfs
 	he := hbi.NewHostingEnv()
 	// expose names for interop
 	interop.ExposeInterOpValues(he)
@@ -86,7 +86,7 @@ func MountJDFS(
 
 	he.ExposeFunction("__hbi_cleanup__", func(discReason string) {
 		if len(discReason) > 0 {
-			fmt.Printf("JDFS server disconnected due to: %s", discReason)
+			fmt.Printf("jdfs disconnected due to: %s", discReason)
 			os.Exit(6)
 		}
 		// TODO auto reconnect
@@ -105,7 +105,7 @@ func MountJDFS(
 
 type fileSystem struct {
 	readOnly bool
-	jdfsPath string
+	jdfPath string
 
 	mu sync.Mutex
 
@@ -149,7 +149,7 @@ func (fs *fileSystem) connReset(
 		defer co.Close()
 		if err = co.SendCode(fmt.Sprintf(`
 Mount(%#v, %#v)
-`, fs.readOnly, fs.jdfsPath)); err != nil {
+`, fs.readOnly, fs.jdfPath)); err != nil {
 			return
 		}
 		if err = co.StartRecv(); err != nil {
@@ -167,7 +167,7 @@ Mount(%#v, %#v)
 		return
 	}(); err != nil {
 		fs.po, fs.ho = nil, nil
-		glog.Errorf("JDFS server mount failed: %+v", err)
+		glog.Errorf("jdfs mount failed: %+v", err)
 		if !po.Disconnected() {
 			po.Disconnect(fmt.Sprintf("server mount failed: %v", err), false)
 		}

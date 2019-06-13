@@ -9,7 +9,7 @@
             "program": "${file}"
         },
         {
-            "name": "JDFS client",
+            "name": "jdfc",
             "type": "go",
             "request": "launch",
             "mode": "auto",

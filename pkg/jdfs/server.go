@@ -15,11 +15,11 @@ import (
 type exportedFileSystem struct {
 	// the root directory that this JDFS server is willing to export.
 	//
-	// a JDFS client can mount jdfsPath="/" for this root directory,
+	// a jdfc can mount jdfPath="/" for this root directory,
 	// or it can mount any sub dir under this path.
 	//
 	// multiple local filesystems can be separately mounted under this path for different
-	// JDFS clients to mount.
+	// jdfc to mount.
 	//
 	// TODO for a JDFS mount to expose nested filesystems under its mounted root dir,
 	// there're possibilities that inode numbers from different fs collide, maybe FUSE
@@ -31,17 +31,17 @@ type exportedFileSystem struct {
 	po *hbi.PostingEnd
 	ho *hbi.HostingEnd
 
-	// effective uid/gid of JDFS server process, this is told to JDFS client when initially
-	// mounted, JDFS client is supposed to translate all inode owner uid/gid of these values
+	// effective uid/gid of jdfs process, this is told to jdfc when initially
+	// mounted, jdfc is supposed to translate all inode owner uid/gid of these values
 	// to its FUSE uid/gid as exposed to client kernel/applications, so the owning uid/gid of
-	// inodes stored in the backing fs at JDFS server can be different from the FUSE uid/gid
-	// at JDFS client, while those files/dirs appear owned by the FUSE uid/gid.
+	// inodes stored in the backing fs at jdfs can be different from the FUSE uid/gid
+	// at jdfc, while those files/dirs appear owned by the FUSE uid/gid.
 	//
 	// TODO decide handling of uid/gid other than these values, to leave them as is, or
 	//      maybe a good idea to translate to a fixed value (e.g. 0=root, 1=daemon) ?
 	jdfsUID, jdfsGID int
 
-	// whether readOnly, as JDFS client requested on initial mount
+	// whether readOnly, as jdfc requested on initial mount
 	readOnly bool
 
 	// in-core filesystem data
@@ -55,21 +55,17 @@ func (efs *exportedFileSystem) NamesToExpose() []string {
 	}
 }
 
-func (efs *exportedFileSystem) Mount(readOnly bool, jdfsPath string) {
+func (efs *exportedFileSystem) Mount(readOnly bool, jdfPath string) {
 	efs.jdfsUID = os.Geteuid()
 	efs.jdfsGID = os.Getegid()
 
 	efs.readOnly = readOnly
 
 	var rootPath string
-	if jdfsPath == "/" || jdfsPath == "" {
+	if jdfPath == "/" || jdfPath == "" {
 		rootPath = efs.exportRoot
 	} else {
-		rootPath = efs.exportRoot + jdfsPath
-	}
-
-	if err := os.Chdir(rootPath); err != nil {
-		panic(err)
+		rootPath = efs.exportRoot + jdfPath
 	}
 
 	if err := efs.icd.init(rootPath, readOnly); err != nil {
