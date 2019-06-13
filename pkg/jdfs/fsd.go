@@ -801,22 +801,25 @@ func (icd *icFSD) OpenDir(inode InodeID) (handle vfs.HandleID, err error) {
 		entries = make([]vfs.DirEnt, 0, len(ici.children))
 	}
 
+	// snapshot dir entries at open
+	// TODO out-of-core handling necessary ?
 	if err = ici.refreshChildren(icd, false, nil, func(childName string, cisi int) {
 		cici := &icd.stoInodes[cisi]
 		entType := vfs.DT_Unknown
 		if cici.attrs.Mode.IsDir() {
 			entType = vfs.DT_Directory
 		} else if cici.attrs.Mode.IsRegular() {
-			entType = vfs.DT_FIFO
+			entType = vfs.DT_File
 		} else if cici.attrs.Mode&os.ModeSymlink != 0 {
 			entType = vfs.DT_Link
 		} else {
 			return // hide this strange inode to jdfc
 		}
 		entries = append(entries, vfs.DirEnt{
-			Offset: vfs.DirOffset(len(entries)),
-			Inode:  cici.inode, Name: childName,
-			Type: entType,
+			Offset: vfs.DirOffset(len(entries) + 1),
+			Inode:  cici.inode,
+			Name:   childName,
+			Type:   entType,
 		})
 	}); err != nil {
 		glog.Warningf("inode lost [%v] - %+v", ici.inode, err)
@@ -837,6 +840,25 @@ func (icd *icFSD) OpenDir(inode InodeID) (handle vfs.HandleID, err error) {
 		})
 	}
 	handle = vfs.HandleID(hsi)
+
+	return
+}
+
+func (icd *icFSD) ReadDir(inode InodeID, handle int, offset int, buf []byte) (bytesRead int, err error) {
+	icdh := &icd.dirHandles[handle]
+	ici := &icd.stoInodes[icdh.isi]
+	if ici.inode != inode {
+		err = syscall.ESTALE // TODO fuse kernel is happy with this ?
+		return
+	}
+
+	for i := offset; i < len(icdh.entries); i++ {
+		n := vfs.WriteDirEnt(buf[bytesRead:], icdh.entries[i])
+		if n <= 0 {
+			break
+		}
+		bytesRead += n
+	}
 
 	return
 }

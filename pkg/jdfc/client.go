@@ -54,7 +54,7 @@ func MountJDFS(
 
 	fs := &fileSystem{
 		readOnly: cfg.ReadOnly,
-		jdfPath: jdfPath,
+		jdfPath:  jdfPath,
 	}
 	mfs, err := fuse.Mount(mountpoint, &fileSystemServer{fs: fs}, cfg)
 	if err != nil {
@@ -105,7 +105,7 @@ func MountJDFS(
 
 type fileSystem struct {
 	readOnly bool
-	jdfPath string
+	jdfPath  string
 
 	mu sync.Mutex
 
@@ -638,7 +638,47 @@ OpenDir(%#v)
 func (fs *fileSystem) ReadDir(
 	ctx context.Context,
 	op *vfs.ReadDirOp) (err error) {
-	err = vfs.ENOSYS
+	co, err := fs.po.NewCo()
+	if err != nil {
+		return err
+	}
+	defer co.Close()
+
+	if err = co.SendCode(fmt.Sprintf(`
+ReadDir(%#v, %#v, %#v, %#v)
+`, op.Inode, op.Handle, op.Offset, len(op.Dst))); err != nil {
+		panic(err)
+	}
+
+	if err = co.StartRecv(); err != nil {
+		return err
+	}
+
+	errno, err := co.RecvObj()
+	if err != nil {
+		return err
+	}
+	if en, ok := errno.(hbi.LitIntType); !ok {
+		panic(errors.Errorf("unexpected errno type [%T] of errno value [%v]", errno, errno))
+	} else if en != 0 {
+		return syscall.Errno(en)
+	}
+
+	bytesRead, err := co.RecvObj()
+	if err != nil {
+		return err
+	}
+	if bytesRead, ok := bytesRead.(hbi.LitIntType); !ok {
+		panic(errors.Errorf("unexpected bytesRead type [%T] of bytesRead value [%v]", bytesRead, bytesRead))
+	} else {
+		op.BytesRead = int(bytesRead)
+	}
+	if op.BytesRead > 0 {
+		if err = co.RecvData(op.Dst[:op.BytesRead]); err != nil {
+			return err
+		}
+	}
+
 	return
 }
 

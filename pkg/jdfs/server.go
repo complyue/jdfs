@@ -46,6 +46,9 @@ type exportedFileSystem struct {
 
 	// in-core filesystem data
 	icd icFSD
+
+	// buffer pool
+	bufPool BufPool
 }
 
 func (efs *exportedFileSystem) NamesToExpose() []string {
@@ -489,5 +492,45 @@ func (efs *exportedFileSystem) OpenDir(inode InodeID) {
 
 	if err := co.SendObj(hbi.Repr(int(handle))); err != nil {
 		panic(err)
+	}
+}
+
+func (efs *exportedFileSystem) ReadDir(inode InodeID, handle int, offset int, bufSz int) {
+	co := efs.ho.Co()
+
+	if err := co.FinishRecv(); err != nil {
+		panic(err)
+	}
+
+	buf := efs.bufPool.Get(bufSz)
+	defer efs.bufPool.Return(buf)
+
+	bytesRead, fsErr := efs.icd.ReadDir(inode, handle, offset, buf)
+
+	if err := co.StartSend(); err != nil {
+		panic(err)
+	}
+
+	switch fse := fsErr.(type) {
+	case nil:
+		if err := co.SendObj(`0`); err != nil {
+			panic(err)
+		}
+	case syscall.Errno:
+		if err := co.SendObj(hbi.Repr(int(fse))); err != nil {
+			panic(err)
+		}
+		return
+	default:
+		panic(fsErr)
+	}
+
+	if err := co.SendObj(hbi.Repr(bytesRead)); err != nil {
+		panic(err)
+	}
+	if bytesRead > 0 {
+		if err := co.SendData(buf[:bytesRead]); err != nil {
+			panic(err)
+		}
 	}
 }
