@@ -457,40 +457,41 @@ func (icd *icFSD) SetInodeAttributes(inode InodeID,
 	if ici == nil {
 		return nil
 	}
-	if err := ici.refreshInode(icd, true, func(inoPath string, inoF *os.File, inoFI os.FileInfo) (keepF bool, err error) {
+	if err := ici.refreshInode(icd, true,
+		func(inoPath string, inoF *os.File, inoFI os.FileInfo) (keepF bool, err error) {
 
-		if chgSize {
-			if err = inoF.Truncate(int64(sz)); err != nil {
+			if chgSize {
+				if err = inoF.Truncate(int64(sz)); err != nil {
+					return
+				}
+			}
+
+			if chgMode {
+				if err = inoF.Chmod(os.FileMode(mode)); err != nil {
+					return
+				}
+			}
+
+			if chgMtime {
+				if err = chftimes(inoF, mNsec); err != nil {
+					return
+				}
+			}
+
+			// stat local fs again for new meta attrs
+			inoFI, err = os.Lstat(inoPath)
+			if err != nil {
 				return
 			}
-		}
-
-		if chgMode {
-			if err = inoF.Chmod(os.FileMode(mode)); err != nil {
-				return
+			im := fi2im(inoFI)
+			if im.inode != ici.inode {
+				panic("inode changed ?!")
 			}
-		}
+			ici.attrs = im.attrs
+			ici.lastChecked = time.Now()
 
-		if chgMtime {
-			if err = chftimes(inoF, mNsec); err != nil {
-				return
-			}
-		}
-
-		// stat local fs again for new meta attrs
-		inoFI, err = os.Lstat(inoPath)
-		if err != nil {
 			return
-		}
-		im := fi2im(inoFI)
-		if im.inode != ici.inode {
-			panic("inode changed ?!")
-		}
-		ici.attrs = im.attrs
-		ici.lastChecked = time.Now()
-
-		return
-	}); err != nil {
+		}); err != nil {
 		panic(errors.Errorf("failed updating inode [%v] - %+v", ici.inode, err))
 	}
 
@@ -877,4 +878,65 @@ func (icd *icFSD) ReleaseDirHandle(handle int) {
 	icd.dirHandles[handle] = icdHandle{} // reset fields to zero values
 
 	icd.freeDHIdxs = append(icd.freeDHIdxs, handle)
+}
+
+func (icd *icFSD) OpenFile(inode InodeID, flags uint32) (handle vfs.HandleID, err error) {
+	icd.mu.Lock()
+	defer icd.mu.Unlock()
+
+	isi, ok := icd.regInodes[inode]
+	if !ok {
+		panic(errors.Errorf("inode [%v] not in-core ?!", inode))
+	}
+	ici := &icd.stoInodes[isi]
+
+	if err = ici.refreshInode(icd, (flags&uint32(os.O_RDWR|os.O_WRONLY)) != 0,
+		func(inoPath string, inoF *os.File, inoFI os.FileInfo) (keepF bool, err error) {
+
+			if !inoFI.Mode().IsRegular() {
+				err = syscall.EINVAL // TODO fuse kernel happy with this ?
+				return
+			}
+
+			keepF = true
+
+			var hsi int
+			if nFreeHdls := len(icd.freeFHIdxs); nFreeHdls > 0 {
+				hsi = icd.freeFHIdxs[nFreeHdls-1]
+				icd.freeFHIdxs = icd.freeFHIdxs[:nFreeHdls-1]
+				icd.fileHandles[hsi] = icfHandle{
+					isi: isi, f: inoF,
+				}
+			} else {
+				hsi = len(icd.fileHandles)
+				icd.fileHandles = append(icd.fileHandles, icfHandle{
+					isi: isi, f: inoF,
+				})
+			}
+			handle = vfs.HandleID(hsi)
+
+			return
+		}); err != nil {
+		return
+	}
+
+	return
+}
+
+func (icd *icFSD) ReadFile(inode InodeID, handle int, offset int64, buf []byte) (bytesRead int, err error) {
+	icd.mu.Lock()
+	defer icd.mu.Unlock()
+
+	icfh := &icd.fileHandles[handle]
+	ici := &icd.stoInodes[icfh.isi]
+	if ici.inode != inode {
+		err = syscall.ESTALE // TODO fuse kernel is happy with this ?
+		return
+	}
+
+	if bytesRead, err = icfh.f.ReadAt(buf, offset); err != nil {
+		return
+	}
+
+	return
 }

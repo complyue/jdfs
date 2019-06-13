@@ -4,6 +4,7 @@ package jdfc
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 	"syscall"
@@ -703,14 +704,104 @@ ReleaseDirHandle(%#v)
 func (fs *fileSystem) OpenFile(
 	ctx context.Context,
 	op *vfs.OpenFileOp) (err error) {
-	err = vfs.ENOSYS
+	co, err := fs.po.NewCo()
+	if err != nil {
+		return err
+	}
+	defer co.Close()
+
+	// always favor kernel page cache over direct io with JDFS
+	// TODO check page cache invalidation properly implemented
+	op.KeepPageCache = true
+	op.UseDirectIO = false
+
+	if err = co.SendCode(fmt.Sprintf(`
+OpenFile(%#v, %#v)
+`, op.Inode, op.Flags)); err != nil {
+		panic(err)
+	}
+
+	if err = co.StartRecv(); err != nil {
+		return err
+	}
+
+	errno, err := co.RecvObj()
+	if err != nil {
+		return err
+	}
+	if en, ok := errno.(hbi.LitIntType); !ok {
+		panic(errors.Errorf("unexpected errno type [%T] of errno value [%v]", errno, errno))
+	} else if en != 0 {
+		return syscall.Errno(en)
+	}
+
+	handle, err := co.RecvObj()
+	if err != nil {
+		return err
+	}
+	if handle, ok := handle.(hbi.LitIntType); !ok {
+		panic(errors.Errorf("unexpected handle type [%T] of handle value [%v]", handle, handle))
+	} else {
+		op.Handle = vfs.HandleID(handle)
+	}
+
 	return
 }
 
 func (fs *fileSystem) ReadFile(
 	ctx context.Context,
 	op *vfs.ReadFileOp) (err error) {
-	err = vfs.ENOSYS
+	co, err := fs.po.NewCo()
+	if err != nil {
+		return err
+	}
+	defer co.Close()
+
+	if err = co.SendCode(fmt.Sprintf(`
+ReadFile(%#v, %#v, %#v, %#v)
+`, op.Inode, op.Handle, op.Offset, len(op.Dst))); err != nil {
+		panic(err)
+	}
+
+	if err = co.StartRecv(); err != nil {
+		return err
+	}
+
+	errno, err := co.RecvObj()
+	if err != nil {
+		return err
+	}
+	if en, ok := errno.(hbi.LitIntType); !ok {
+		panic(errors.Errorf("unexpected errno type [%T] of errno value [%v]", errno, errno))
+	} else if en != 0 {
+		return syscall.Errno(en)
+	}
+
+	bytesRead, err := co.RecvObj()
+	if err != nil {
+		return err
+	}
+	if bytesRead, ok := bytesRead.(hbi.LitIntType); !ok {
+		panic(errors.Errorf("unexpected bytesRead type [%T] of bytesRead value [%v]", bytesRead, bytesRead))
+	} else {
+		op.BytesRead = int(bytesRead)
+	}
+	if op.BytesRead > 0 {
+		if err = co.RecvData(op.Dst[:op.BytesRead]); err != nil {
+			return err
+		}
+	}
+
+	eof, err := co.RecvObj()
+	if err != nil {
+		return err
+	}
+	if eof, ok := eof.(bool); !ok {
+		panic(errors.Errorf("unexpected eof type [%T] of eof value [%v]", eof, eof))
+	} else if eof {
+		err = io.EOF
+	}
+
 	return
 }
 
