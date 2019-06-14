@@ -3,7 +3,6 @@ package jdfs
 import (
 	"os"
 	"syscall"
-	"time"
 
 	"github.com/complyue/jdfs/pkg/errors"
 	"github.com/complyue/jdfs/pkg/vfs"
@@ -17,16 +16,14 @@ func statFS(rootDir *os.File) (op vfs.StatFSOp, err error) {
 	return
 }
 
-func ts2t(ts syscall.Timespec) time.Time {
-	return time.Unix(ts.Sec, ts.Nsec)
-}
-
 func fi2im(fi os.FileInfo) iMeta {
 	sd, ok := fi.Sys().(*syscall.Stat_t)
 	if !ok {
 		panic(errors.Errorf("Incompatible local file: [%s]", fi.Name))
 	}
 	return iMeta{
+		parentPath: parentPath, name: fi.Name(),
+
 		dev: int64(sd.Dev), inode: InodeID(sd.Ino),
 		attrs: InodeAttributes{
 			Nlink:  uint32(sd.Nlink),
@@ -35,6 +32,8 @@ func fi2im(fi os.FileInfo) iMeta {
 			Mtime:  ts2t(sd.Mtim),
 			Ctime:  ts2t(sd.Ctim),
 			Crtime: ts2t(sd.Ctim),
+
+			Uid: sd.Uid, Gid: sd.Gid,
 		},
 	}
 }

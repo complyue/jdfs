@@ -12,28 +12,21 @@ import (
 	"github.com/golang/glog"
 )
 
-// In-core filesystem data
-
-type (
-	InodeID         = vfs.InodeID
-	InodeAttributes = vfs.InodeAttributes
-)
-
-type iMeta struct {
-	dev   int64
-	inode InodeID
-	attrs InodeAttributes
-}
-
 // in-core inode info
 type icInode struct {
-	// embed an inode meta data struct
-	iMeta
+	// meta data of this inode
+	inode vfs.InodeID
+	attrs vfs.InodeAttributes
 
-	// the in-core record will be freed when reference count is decreased to zero
+	// number of references counted by FUSE
+	//
+	// when an in-core record's reference count is decreased to zero, it'll be dropped,
+	// and all it's children with 0 refcnt will be dropped as well.
+	//
+	// note: prefetched records will be in-core but have refcnt==0
 	refcnt int
 
-	// paths through which this inode has been reached
+	// jdf paths through which this inode has been reached
 	reachedThrough []string
 
 	// last time at which attrs/children are refreshed
@@ -43,7 +36,7 @@ type icInode struct {
 	// for a dir after cache is invalidated, if non-nil, the map is per-see at
 	// lastChecked time.
 	// todo is there needs to preserve directory order? if so an ordered map should be used.
-	children map[string]InodeID
+	children map[string]vfs.InodeID
 }
 
 // in-core handle to a dir held open
@@ -61,28 +54,13 @@ type icfHandle struct {
 // in-core filesystem data
 //
 // a process should have only one icd active,
-// with its pwd chdir'ed to the mounted rootDir with icd.init()
+// with its pwd chdir'ed to the mounted jdfsRootPath with icd.init()
 type icFSD struct {
-	// hold the JDFS mounted root dir open, so as to prevent it from unlinked,
-	// until jdfc disconnected.
-	rootDir *os.File
-
-	// device of JDFS mount root
-	//
-	// nested directory with other filesystems mounted will be hidden to jdfc
-	rootDevice int64
-
-	// inode value of the JDFS mount root
-	//
-	// jdfc is not restricted to only mount root of local filesystem of jdfs,
-	// in case a nested dir is mounted as JDFS root, inode of mounted root will be other
-	// than 1, which is the constant for FUSE fs root.
-	rootInode vfs.InodeID
 
 	// registry of in-core info of inodes
-	regInodes   map[InodeID]int // map inode ID to indices into stoInodes
-	stoInodes   []icInode       // flat storage of icInodes
-	freeInoIdxs []int           // free list of indices into stoInodes
+	regInodes   map[vfs.InodeID]int // map inode ID to indices into stoInodes
+	stoInodes   []icInode           // flat storage of icInodes
+	freeInoIdxs []int               // free list of indices into stoInodes
 
 	// registry of dir handles held open, a dir handle value is index into this slice
 	dirHandles []icdHandle // flat storage of handles
@@ -96,46 +74,46 @@ type icFSD struct {
 	mu sync.Mutex
 }
 
-func (icd *icFSD) init(rootPath string, readOnly bool) error {
+func (icd *icFSD) init(readOnly bool) error {
 	var flags int
 	if readOnly {
 		flags = os.O_RDONLY
 	} else {
 		flags = os.O_RDWR
 	}
-	rootFI, err := os.Lstat(rootPath)
+	if err := os.Chdir(jdfsRootPath); err != nil {
+		return errors.Errorf("Error chdir to jdfs path: [%s] - %+v", jdfsRootPath, err)
+	}
+	rootFI, err := os.Lstat(".")
 	if err != nil {
-		return errors.Errorf("Bad jdfs path: [%s] - %+v", rootPath, err)
+		return errors.Errorf("Bad jdfs path: [%s] - %+v", jdfsRootPath, err)
 	}
-	if !rootFI.IsDir() {
-		return errors.Errorf("Not a dir at jdfs: [%s]", rootPath)
-	}
-	if err = os.Chdir(rootPath); err != nil {
-		return errors.Errorf("Error chdir to jdfs path: [%s] - %+v", rootPath, err)
-	}
-	rootDir, err := os.OpenFile(rootPath, flags, 0)
+	rootDir, err := os.OpenFile(".", flags, 0)
 	if err != nil {
-		return errors.Errorf("Error open jdfs path: [%s] - %+v", rootPath, err)
+		return errors.Errorf("Error open jdfs path: [%s] - %+v", jdfsRootPath, err)
 	}
 
-	inode := fi2im(rootFI)
+	rootM := fi2im("", rootFI)
 
 	icd.mu.Lock()
 	defer icd.mu.Unlock()
 
-	icd.rootDir = rootDir
-	icd.rootDevice = inode.dev
-	icd.rootInode = inode.inode
+	if jdfRootDir != nil {
+		jdfRootDir.Close()
+	}
+	jdfRootDir = rootDir
+	jdfRootDevice = rootM.dev
+	jdfRootInode = rootM.inode
 
 	// todo sophisticate initial in-core data allocation,
 	// may base on statistics from local fs and config.
-	icd.regInodes = make(map[InodeID]int)
+	icd.regInodes = make(map[vfs.InodeID]int)
 	icd.stoInodes = nil
 	icd.freeInoIdxs = nil
 	icd.fileHandles = []icfHandle{icfHandle{}} // reserve 0 for nil handle
 	icd.freeFHIdxs = nil
 
-	isi := icd.loadInode(rootFI, "/")
+	isi := icd.loadInode(rootM)
 	if isi != 0 {
 		panic("root inode got isi other than zero ?!?")
 	}
@@ -146,82 +124,113 @@ func (icd *icFSD) init(rootPath string, readOnly bool) error {
 }
 
 // must have icd.mu locked
-func (icd *icFSD) loadInode(fi os.FileInfo, jdfPath string) (isi int) {
-	inode := fi2im(fi)
-
-	if inode.dev != icd.rootDevice {
+func (icd *icFSD) loadInode(im iMeta) (isi int) {
+	jdfPath := im.jdfPath()
+	if im.dev != jdfRootDevice {
 		glog.Warningf("Nested mount point [%s] under [%s] not supported by JDFS.",
-			jdfPath, icd.rootDir.Name())
+			jdfPath, jdfsRootPath)
 		return -1
 	}
 
 	var ok bool
-	isi, ok = icd.regInodes[inode.inode]
-	if ok {
-		// hard link to a known inode
+	isi, ok = icd.regInodes[im.inode]
+	if ok { // discovered a new hard link to a known inode
 		ici := &icd.stoInodes[isi]
-		if inode.inode != ici.inode {
+		if im.inode != ici.inode {
 			panic(errors.New("regInodes corrupted ?!"))
 		}
-		if inode.dev != ici.dev {
-			panic(errors.New("inode device changed ?!"))
-		}
-		for _, reachPath := range ici.reachedThrough {
-			if reachPath == jdfPath {
-				panic(errors.New("in-core inode reached by same path twice ?!"))
+
+		// record reached through jdfPath
+		prevReached := false
+		for i := len(ici.reachedThrough) - 1; i >= 0; i-- {
+			if ici.reachedThrough[i] == jdfPath {
+				prevReached = true
+				break
 			}
 		}
-
-		// reached from a new path
-		ici.reachedThrough = append(ici.reachedThrough, jdfPath)
+		if !prevReached { // reached from a new path
+			ici.reachedThrough = append(ici.reachedThrough, jdfPath)
+		}
 
 		// update meta attrs
-		ici.attrs = inode.attrs
+		ici.attrs = im.attrs
 		ici.lastChecked = time.Now()
-
-		// invalidate cached dir children
-		// (may actually be not needed as dirs are not allowed to be hard linked)
-		ici.children = nil
-		return
-	} else {
-		// 1st time reaching an inode
-		if nfi := len(icd.freeInoIdxs); nfi > 0 {
-			isi = icd.freeInoIdxs[nfi-1]
-			icd.freeInoIdxs = icd.freeInoIdxs[:nfi-1]
-		} else {
-			isi = len(icd.stoInodes)
-			icd.stoInodes = append(icd.stoInodes, icInode{})
-		}
-		ici := &icd.stoInodes[isi]
-		*ici = icInode{
-			iMeta: inode,
-
-			// not necessarily referenced by fuse kernel,
-			// will be increased by respective ops
-			refcnt: 0,
-			// TODO this jdfs implementation prefetches children inodes aggressively,
-			//      impacts of extreme huge directories is yet to be addressed.
-
-			reachedThrough: []string{jdfPath},
-			lastChecked:    time.Now(),
-			children:       nil,
-		}
 		return
 	}
-	panic("should never reach here")
+
+	// 1st time reaching an inode
+	if nfi := len(icd.freeInoIdxs); nfi > 0 {
+		isi = icd.freeInoIdxs[nfi-1]
+		icd.freeInoIdxs = icd.freeInoIdxs[:nfi-1]
+	} else {
+		isi = len(icd.stoInodes)
+		icd.stoInodes = append(icd.stoInodes, icInode{})
+	}
+	ici := &icd.stoInodes[isi]
+	*ici = icInode{
+		inode: im.inode, attrs: im.attrs,
+
+		// not necessarily referenced by fuse kernel,
+		// will be increased by respective ops
+		refcnt: 0,
+		// TODO this jdfs implementation prefetches children inodes aggressively,
+		//      impacts of extreme huge directories is yet to be addressed.
+
+		reachedThrough: []string{jdfPath},
+		lastChecked:    time.Now(),
+		children:       nil,
+	}
+
+	return
 }
 
-func (icd *icFSD) ForgetInode(inode InodeID, n int) {
+// LoadInode loads the specified inode meta data, then returns a snapshot copy of the
+// in-core inode record, if the load was successful.
+func (icd *icFSD) LoadInode(incRef int, im iMeta,
+	outdatedPaths []string, children map[string]vfs.InodeID) (ici icInode, ok bool) {
 	icd.mu.Lock()
 	defer icd.mu.Unlock()
 
-	if inode == icd.rootInode {
+	isi := icd.loadInode(im)
+	if isi < 0 {
+		return // situation should have been loaded in loadInode()
+	}
+
+	icip := &icd.stoInodes[isi]
+	if icip.inode != im.inode {
+		panic(errors.Errorf("inode [%v] changed to [%v] ?!", im.inode, icip.inode))
+	}
+
+	for _, outdatedPath := range outdatedPaths {
+		rpl := len(icip.reachedThrough)
+		if rpl <= 0 {
+			break
+		}
+		if outdatedPath == icip.reachedThrough[rpl-1] {
+			icip.reachedThrough = icip.reachedThrough[:rpl-1]
+		}
+	}
+
+	if children != nil {
+		icip.children = children
+	}
+
+	icip.refcnt += incRef
+	ici, ok = *icip, true
+	return
+}
+
+func (icd *icFSD) ForgetInode(inode vfs.InodeID, n int) {
+	if inode == jdfRootInode {
 		panic(errors.Errorf("forget root ?!"))
 	}
 
 	if n <= 0 {
 		panic(errors.Errorf("forget %d ref ?!", n))
 	}
+
+	icd.mu.Lock()
+	defer icd.mu.Unlock()
 
 	isi, ok := icd.regInodes[inode]
 	if !ok {
@@ -239,16 +248,39 @@ func (icd *icFSD) ForgetInode(inode InodeID, n int) {
 		return // still referenced
 	}
 
-	delete(icd.regInodes, inode)
-	icd.stoInodes[isi] = icInode{} // clear all fields to zero values
-	icd.freeInoIdxs = append(icd.freeInoIdxs, isi)
+	icd.forgetInode(inode)
 }
 
 // must have icd.mu locked
-func (icd *icFSD) getInode(inode InodeID) *icInode {
+func (icd *icFSD) forgetInode(inode vfs.InodeID) {
 	isi, ok := icd.regInodes[inode]
 	if !ok {
-		glog.Errorf("inode not in-core [%v] ?!", inode)
+		panic(errors.Errorf("inode [%v] not in-core ?!", inode))
+	}
+	ici := &icd.stoInodes[isi]
+
+	if ici.refcnt > 0 {
+		return // still referenced
+	}
+
+	delete(icd.regInodes, inode)
+	icd.stoInodes[isi] = icInode{} // clear all fields to zero values
+	icd.freeInoIdxs = append(icd.freeInoIdxs, isi)
+
+	if ici.children == nil {
+		return // no children cached
+	}
+
+	for _, cInode := range ici.children {
+		icd.forgetInode(cInode)
+	}
+}
+
+// must have icd.mu locked
+func (icd *icFSD) getInode(inode vfs.InodeID) *icInode {
+	isi, ok := icd.regInodes[inode]
+	if !ok {
+		glog.V(1).Infof("inode not in-core [%v]", inode)
 		return nil
 	}
 	ici := &icd.stoInodes[isi]
@@ -256,285 +288,25 @@ func (icd *icFSD) getInode(inode InodeID) *icInode {
 		glog.Errorf("inode disappeared [%v] ?!", inode)
 		return nil
 	}
-
 	return ici
 }
 
-// must have icd.mu locked
-func (ici *icInode) refreshInode(icd *icFSD, forWrite bool,
-	withF func(path string, f *os.File, fi os.FileInfo) (keepF bool, err error),
-) (err error) {
-	openFlags := os.O_RDONLY
-	if forWrite {
-		openFlags = os.O_RDWR
-	}
-	var (
-		inoPath string
-		inoF    *os.File
-		keepF   = false
-	)
-	defer func() {
-		if inoF != nil && (err != nil || !keepF) {
-			inoF.Close()
-		}
-	}()
-	var inoFI os.FileInfo
-	var im iMeta
-	for iPath := len(ici.reachedThrough) - 1; iPath >= 0; ici.reachedThrough, iPath = ici.reachedThrough[:iPath], iPath-1 {
-		inoPath = ici.reachedThrough[iPath]
-		// jdfs process has mounted root dir as pwd, so can just open jdfPath
-		if inoF != nil {
-			inoF.Close()
-			inoF = nil
-		}
-		if inoFI, err = os.Lstat(inoPath); err != nil {
-			glog.Warningf("JDFS [%s]:[%s] disappeared - %+v", icd.rootDir.Name(), inoPath, err)
-			continue
-		} else if (inoFI.Mode() & os.ModeSymlink) != 0 {
-			// reload a symlink
-		} else if !inoFI.Mode().IsRegular() {
-			// TODO handle other non-regular file cases
-			panic(errors.Errorf("unexpected file mode [%v] of [%s]:[%s]", inoFI.Mode(), icd.rootDir.Name(), inoPath))
-		}
-
-		if im = fi2im(inoFI); im.inode != ici.inode {
-			glog.Warningf("JDFS [%s]:[%s] is inode [%v] instead of [%v] now.",
-				icd.rootDir.Name(), inoPath, im.inode, ici.inode)
-			continue
-		}
-
-		inoF, err = os.OpenFile(inoPath, openFlags, 0)
-		if err != nil {
-			glog.Warningf("JDFS [%s]:[%s] no longer be inode [%v] - %+v",
-				icd.rootDir.Name(), inoPath, ici.inode, err)
-			inoF = nil
-			continue
-		}
-		break // got inoF of same inode
-	}
-
-	if inoF == nil {
-		return vfs.ENOENT
-	}
-
-	ici.attrs = im.attrs
-	ici.lastChecked = time.Now()
-
-	if withF != nil {
-		keepF, err = withF(inoPath, inoF, inoFI)
-		if err != nil {
-			return
-		}
-	}
-
-	return
-}
-
-// must have icd.mu locked
-func (ici *icInode) refreshChildren(icd *icFSD, forWrite bool,
-	withParent func(parentPath string, parentDir *os.File, parentFI os.FileInfo) (keepParentF bool, err error),
-	withChild func(childName string, cisi int)) (err error) {
-	return ici.refreshInode(icd, forWrite,
-		func(parentPath string, parentDir *os.File, parentFI os.FileInfo) (keepF bool, err error) {
-			ici.children = nil
-			if parentDir == nil || !parentFI.IsDir() { // not a dir anymore
-				return
-			}
-
-			if withParent != nil {
-				keepF, err = withParent(parentPath, parentDir, parentFI)
-				if err != nil {
-					return
-				}
-			}
-
-			// TODO should either prevent extremely large directories, or implement out-of-core handling of them,
-			//      to prefetch huge amount of child inodes in-core may overload the jdfs host or even crash it.
-			var cFIs []os.FileInfo
-			cFIs, err = parentDir.Readdir(0)
-			if err != nil {
-				return
-			}
-			ici.children = make(map[string]InodeID, len(cFIs))
-			for _, cfi := range cFIs {
-				if cfi.IsDir() {
-					// a dir
-				} else if cfi.Mode().IsRegular() {
-					// a regular file
-				} else {
-					// hide non-regular files to jdfc
-					continue
-				}
-
-				cisi := icd.loadInode(cfi, fmt.Sprintf("%s/%s", parentPath, cfi.Name()))
-				if cisi < 0 {
-					// most prolly a nested mount point, invisible to jdfc
-					continue
-				}
-				cici := &icd.stoInodes[cisi]
-				ici.children[cfi.Name()] = cici.inode
-
-				if withChild != nil {
-					withChild(cfi.Name(), cisi)
-				}
-			}
-
-			return
-		})
-}
-
-func (icd *icFSD) GetInode(inode InodeID) *icInode {
+// GetInode returns a snapshot of in-core inode record
+func (icd *icFSD) GetInode(incRef int, inode vfs.InodeID) (ici icInode, ok bool) {
 	icd.mu.Lock()
 	defer icd.mu.Unlock()
 
-	return icd.getInode(inode)
-}
-
-func (icd *icFSD) FetchInode(inode InodeID) *vfs.InodeAttributes {
-	icd.mu.Lock()
-	defer icd.mu.Unlock()
-
-	ici := icd.getInode(inode)
-	if ici == nil {
-		return nil
-	}
-
-	if time.Now().Sub(ici.lastChecked) > vfs.META_ATTRS_CACHE_TIME {
-		if err := ici.refreshInode(icd, false, nil); err != nil {
-			panic(errors.Errorf("inode [%v] lost - %+v", ici.inode, err))
-		}
-	}
-
-	return &ici.attrs
-}
-
-func (icd *icFSD) LookUpInode(parent InodeID, name string) (*vfs.ChildInodeEntry, error) {
-	icd.mu.Lock()
-	defer icd.mu.Unlock()
-
-	isi, ok := icd.regInodes[parent]
-	if !ok {
-		panic(errors.Errorf("parent inode [%v] not in-core ?!", parent))
-	}
-	ici := &icd.stoInodes[isi]
-
-	var matchedChild *icInode
-	if ici.children == nil || time.Now().Sub(ici.lastChecked) > vfs.DIR_CHILDREN_CACHE_TIME {
-		// reload children
-		if err := ici.refreshChildren(icd, false, nil, func(childName string, cisi int) {
-			if childName == name {
-				matchedChild = &icd.stoInodes[cisi]
-				matchedChild.refcnt++
-			}
-		}); err != nil {
-			// parent dir went away, this possible ?
-			return nil, err
-		}
-	} else if cInode, ok := ici.children[name]; ok {
-		matchedChild = icd.getInode(cInode)
-	}
-
-	if matchedChild == nil {
-		return nil, vfs.ENOENT
-	}
-	return &vfs.ChildInodeEntry{
-		Child:                matchedChild.iMeta.inode,
-		Generation:           0,
-		Attributes:           matchedChild.iMeta.attrs,
-		AttributesExpiration: time.Now().Add(vfs.META_ATTRS_CACHE_TIME),
-		EntryExpiration:      time.Now().Add(vfs.DIR_CHILDREN_CACHE_TIME),
-	}, nil
-}
-
-func (icd *icFSD) SetInodeAttributes(inode InodeID,
-	chgSize, chgMode, chgMtime bool,
-	sz uint64, mode uint32, mNsec int64,
-) *icInode {
-	icd.mu.Lock()
-	defer icd.mu.Unlock()
-
-	ici := icd.getInode(inode)
-	if ici == nil {
-		return nil
-	}
-	if err := ici.refreshInode(icd, true,
-		func(inoPath string, inoF *os.File, inoFI os.FileInfo) (keepF bool, err error) {
-
-			if chgSize {
-				if err = inoF.Truncate(int64(sz)); err != nil {
-					return
-				}
-			}
-
-			if chgMode {
-				if err = inoF.Chmod(os.FileMode(mode)); err != nil {
-					return
-				}
-			}
-
-			if chgMtime {
-				if err = chftimes(inoF, mNsec); err != nil {
-					return
-				}
-			}
-
-			// stat local fs again for new meta attrs
-			inoFI, err = os.Lstat(inoPath)
-			if err != nil {
-				return
-			}
-			im := fi2im(inoFI)
-			if im.inode != ici.inode {
-				panic("inode changed ?!")
-			}
-			ici.attrs = im.attrs
-			ici.lastChecked = time.Now()
-
-			return
-		}); err != nil {
-		panic(errors.Errorf("failed updating inode [%v] - %+v", ici.inode, err))
-	}
-
-	return ici
-}
-
-func (icd *icFSD) MkDir(parent InodeID, name string, mode uint32) (ce *vfs.ChildInodeEntry, err error) {
-	icd.mu.Lock()
-	defer icd.mu.Unlock()
-
-	isi, ok := icd.regInodes[parent]
-	if !ok {
-		panic(errors.Errorf("parent inode [%v] not in-core ?!", parent))
-	}
-	ici := &icd.stoInodes[isi]
-
-	if err = ici.refreshChildren(icd, true,
-		func(parentPath string, parentDir *os.File, parentFI os.FileInfo) (keepF bool, err error) {
-			if err = os.Mkdir(fmt.Sprintf("%s/%s", parentPath, name), os.FileMode(mode)); err != nil {
-				return
-			}
-			return
-		}, func(childName string, cisi int) {
-			if childName == name {
-				cici := &icd.stoInodes[cisi]
-				cici.refcnt++
-				ce = &vfs.ChildInodeEntry{
-					Child:                cici.iMeta.inode,
-					Generation:           0,
-					Attributes:           cici.iMeta.attrs,
-					AttributesExpiration: time.Now().Add(vfs.META_ATTRS_CACHE_TIME),
-					EntryExpiration:      time.Now().Add(vfs.DIR_CHILDREN_CACHE_TIME),
-				}
-			}
-		}); err != nil {
-		glog.Warningf("inode lost [%v] - %+v", ici.inode, err)
+	icip := icd.getInode(inode)
+	if icip == nil {
 		return
 	}
 
+	icip.refcnt += incRef
+	ici, ok = *icip, true
 	return
 }
 
-func (icd *icFSD) CreateFile(parent InodeID, name string, mode uint32) (
+func (icd *icFSD) CreateFile(parent vfs.InodeID, name string, mode uint32) (
 	ce *vfs.ChildInodeEntry, handle vfs.HandleID, err error) {
 	icd.mu.Lock()
 	defer icd.mu.Unlock()
@@ -604,7 +376,7 @@ func (icd *icFSD) CreateFile(parent InodeID, name string, mode uint32) (
 	return
 }
 
-func (icd *icFSD) CreateSymlink(parent InodeID, name string, target string) (ce *vfs.ChildInodeEntry, err error) {
+func (icd *icFSD) CreateSymlink(parent vfs.InodeID, name string, target string) (ce *vfs.ChildInodeEntry, err error) {
 	icd.mu.Lock()
 	defer icd.mu.Unlock()
 
@@ -625,9 +397,9 @@ func (icd *icFSD) CreateSymlink(parent InodeID, name string, target string) (ce 
 				cici := &icd.stoInodes[cisi]
 				cici.refcnt++
 				ce = &vfs.ChildInodeEntry{
-					Child:                cici.iMeta.inode,
+					Child:                cici.inode,
 					Generation:           0,
-					Attributes:           cici.iMeta.attrs,
+					Attributes:           cici.attrs,
 					AttributesExpiration: time.Now().Add(vfs.META_ATTRS_CACHE_TIME),
 					EntryExpiration:      time.Now().Add(vfs.DIR_CHILDREN_CACHE_TIME),
 				}
@@ -640,7 +412,7 @@ func (icd *icFSD) CreateSymlink(parent InodeID, name string, target string) (ce 
 	return
 }
 
-func (icd *icFSD) CreateLink(parent InodeID, name string, target InodeID) (ce *vfs.ChildInodeEntry, err error) {
+func (icd *icFSD) CreateLink(parent vfs.InodeID, name string, target vfs.InodeID) (ce *vfs.ChildInodeEntry, err error) {
 	icd.mu.Lock()
 	defer icd.mu.Unlock()
 
@@ -669,9 +441,9 @@ func (icd *icFSD) CreateLink(parent InodeID, name string, target InodeID) (ce *v
 						cici := &icd.stoInodes[cisi]
 						cici.refcnt++
 						ce = &vfs.ChildInodeEntry{
-							Child:                cici.iMeta.inode,
+							Child:                cici.inode,
 							Generation:           0,
-							Attributes:           cici.iMeta.attrs,
+							Attributes:           cici.attrs,
 							AttributesExpiration: time.Now().Add(vfs.META_ATTRS_CACHE_TIME),
 							EntryExpiration:      time.Now().Add(vfs.DIR_CHILDREN_CACHE_TIME),
 						}
@@ -689,7 +461,7 @@ func (icd *icFSD) CreateLink(parent InodeID, name string, target InodeID) (ce *v
 	return
 }
 
-func (icd *icFSD) Rename(oldParent InodeID, oldName string, newParent InodeID, newName string) (err error) {
+func (icd *icFSD) Rename(oldParent vfs.InodeID, oldName string, newParent vfs.InodeID, newName string) (err error) {
 	icd.mu.Lock()
 	defer icd.mu.Unlock()
 
@@ -731,7 +503,7 @@ func (icd *icFSD) Rename(oldParent InodeID, oldName string, newParent InodeID, n
 	return
 }
 
-func (icd *icFSD) RmDir(parent InodeID, name string) (err error) {
+func (icd *icFSD) RmDir(parent vfs.InodeID, name string) (err error) {
 	icd.mu.Lock()
 	defer icd.mu.Unlock()
 
@@ -748,7 +520,12 @@ func (icd *icFSD) RmDir(parent InodeID, name string) (err error) {
 				return
 			}
 
-			ici.children = nil // invalidate cached children
+			if ici.children != nil {
+				if cInode, ok := ici.children[name]; ok {
+					delete(ici.children, name)
+					icd.forgetInode(cInode)
+				}
+			}
 
 			return
 		}); err != nil {
@@ -759,7 +536,7 @@ func (icd *icFSD) RmDir(parent InodeID, name string) (err error) {
 	return
 }
 
-func (icd *icFSD) Unlink(parent InodeID, name string) (err error) {
+func (icd *icFSD) Unlink(parent vfs.InodeID, name string) (err error) {
 	icd.mu.Lock()
 	defer icd.mu.Unlock()
 
@@ -776,7 +553,12 @@ func (icd *icFSD) Unlink(parent InodeID, name string) (err error) {
 				return
 			}
 
-			ici.children = nil // invalidate cached children
+			if ici.children != nil {
+				if cInode, ok := ici.children[name]; ok {
+					delete(ici.children, name)
+					icd.forgetInode(cInode)
+				}
+			}
 
 			return
 		}); err != nil {
@@ -787,7 +569,7 @@ func (icd *icFSD) Unlink(parent InodeID, name string) (err error) {
 	return
 }
 
-func (icd *icFSD) OpenDir(inode InodeID) (handle vfs.HandleID, err error) {
+func (icd *icFSD) OpenDir(inode vfs.InodeID) (handle vfs.HandleID, err error) {
 	icd.mu.Lock()
 	defer icd.mu.Unlock()
 
@@ -845,7 +627,7 @@ func (icd *icFSD) OpenDir(inode InodeID) (handle vfs.HandleID, err error) {
 	return
 }
 
-func (icd *icFSD) ReadDir(inode InodeID, handle int, offset int, buf []byte) (bytesRead int, err error) {
+func (icd *icFSD) ReadDir(inode vfs.InodeID, handle int, offset int, buf []byte) (bytesRead int, err error) {
 	icd.mu.Lock()
 	defer icd.mu.Unlock()
 
@@ -857,7 +639,7 @@ func (icd *icFSD) ReadDir(inode InodeID, handle int, offset int, buf []byte) (by
 	}
 
 	for i := offset; i < len(icdh.entries); i++ {
-		n := vfs.WriteDirEnt(buf[bytesRead:], icdh.entries[i])
+		n := vfs.Writevfs.DirEnt(buf[bytesRead:], icdh.entries[i])
 		if n <= 0 {
 			break
 		}
@@ -880,7 +662,7 @@ func (icd *icFSD) ReleaseDirHandle(handle int) {
 	icd.freeDHIdxs = append(icd.freeDHIdxs, handle)
 }
 
-func (icd *icFSD) OpenFile(inode InodeID, flags uint32) (handle vfs.HandleID, err error) {
+func (icd *icFSD) OpenFile(inode vfs.InodeID, flags uint32) (handle vfs.HandleID, err error) {
 	icd.mu.Lock()
 	defer icd.mu.Unlock()
 
@@ -923,7 +705,7 @@ func (icd *icFSD) OpenFile(inode InodeID, flags uint32) (handle vfs.HandleID, er
 	return
 }
 
-func (icd *icFSD) ReadFile(inode InodeID, handle int, offset int64, buf []byte) (bytesRead int, err error) {
+func (icd *icFSD) ReadFile(inode vfs.InodeID, handle int, offset int64, buf []byte) (bytesRead int, err error) {
 	icd.mu.Lock()
 	defer icd.mu.Unlock()
 

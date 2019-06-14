@@ -224,14 +224,10 @@ LookUpInode(%#v, %#v)
 		return
 	}
 
-	errno, err := co.RecvObj()
-	if err != nil {
+	if errno, err := co.RecvObj(); err != nil {
 		return err
-	}
-	if en, ok := errno.(hbi.LitIntType); !ok {
-		panic(errors.Errorf("unexpected errno type [%T] of errno value [%v]", errno, errno))
-	} else if en != 0 {
-		return syscall.Errno(en)
+	} else if en := errno.(hbi.LitIntType); en != 0 {
+		return syscall.Errno(en) // TODO assess errno compatibility esp. when jdfs/jdfc run different Arch/OSes
 	}
 
 	bufView := ((*[unsafe.Sizeof(op.Entry)]byte)(unsafe.Pointer(&op.Entry)))[:unsafe.Sizeof(op.Entry)]
@@ -249,14 +245,23 @@ func (fs *fileSystem) GetInodeAttributes(
 		return err
 	}
 	defer co.Close()
+
 	if err = co.SendCode(fmt.Sprintf(`
 GetInodeAttributes(%#v)
 `, op.Inode)); err != nil {
 		return err
 	}
+
 	if err = co.StartRecv(); err != nil {
 		return
 	}
+
+	if errno, err := co.RecvObj(); err != nil {
+		return err
+	} else if en := errno.(hbi.LitIntType); en != 0 {
+		return syscall.Errno(en) // TODO assess errno compatibility esp. when jdfs/jdfc run different Arch/OSes
+	}
+
 	bufView := ((*[unsafe.Sizeof(op.Attributes)]byte)(unsafe.Pointer(&op.Attributes)))[:unsafe.Sizeof(op.Attributes)]
 	if err = co.RecvData(bufView); err != nil {
 		return err
@@ -304,6 +309,12 @@ SetInodeAttributes(%#v,
 
 	if err = co.StartRecv(); err != nil {
 		return err
+	}
+
+	if errno, err := co.RecvObj(); err != nil {
+		return err
+	} else if en := errno.(hbi.LitIntType); en != 0 {
+		return syscall.Errno(en) // TODO assess errno compatibility esp. when jdfs/jdfc run different Arch/OSes
 	}
 
 	bufView := ((*[unsafe.Sizeof(op.Attributes)]byte)(unsafe.Pointer(&op.Attributes)))[:unsafe.Sizeof(op.Attributes)]
