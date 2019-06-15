@@ -16,7 +16,7 @@ func statFS(rootDir *os.File) (op vfs.StatFSOp, err error) {
 	return
 }
 
-func fi2im(fi os.FileInfo) iMeta {
+func fi2im(parentPath string, fi os.FileInfo) iMeta {
 	sd, ok := fi.Sys().(*syscall.Stat_t)
 	if !ok {
 		panic(errors.Errorf("Incompatible local file: [%s]", fi.Name))

@@ -47,6 +47,16 @@ func (im iMeta) jdfPath() string {
 	return im.name
 }
 
+func (im iMeta) jdfChildPath(name string) string {
+	if len(im.parentPath) > 0 { // normal case
+		return fmt.Sprintf("%s/%s/%s", im.parentPath, im.name, name)
+	} else if name == "." { // direct child of JDFS mount root
+		return name
+	} else { // deeper child
+		return fmt.Sprintf("%s/%s", im.name, name)
+	}
+}
+
 func statInode(inode vfs.InodeID, reachedThrough []string) (
 	inoM iMeta, outdatedPaths []string, err error) {
 

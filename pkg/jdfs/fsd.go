@@ -30,11 +30,16 @@ type icInode struct {
 	reachedThrough []string
 
 	// last time at which attrs/children are refreshed
-	lastChecked time.Time
+	lastChecked         time.Time
+	lastChildrenChecked time.Time
 
-	// cached children of a dir. will always be nil for non-dir inode; and will be nil
-	// for a dir after cache is invalidated, if non-nil, the map is per-see at
-	// lastChecked time.
+	// cached inode ids of children of a dir.
+	// will always be nil for non-dir inode; and will be nil for a dir inode, before it's
+	// loaded, or has been forcefully invalidated.
+	//
+	// if non-nil, the map is per-see at lastChildrenChecked time, and is safe to be read
+	// concurrently as it won't be written concurrently.
+	//
 	// todo is there needs to preserve directory order? if so an ordered map should be used.
 	children map[string]vfs.InodeID
 }
@@ -113,18 +118,19 @@ func (icd *icFSD) init(readOnly bool) error {
 	icd.fileHandles = []icfHandle{icfHandle{}} // reserve 0 for nil handle
 	icd.freeFHIdxs = nil
 
-	isi := icd.loadInode(rootM)
+	isi := icd.loadInode(1, rootM, nil, nil, time.Now())
 	if isi != 0 {
 		panic("root inode got isi other than zero ?!?")
 	}
 	ici := &icd.stoInodes[isi]
-	ici.refcnt++ // not really needed as root inode won't be forgotten anyway
 
 	return nil
 }
 
 // must have icd.mu locked
-func (icd *icFSD) loadInode(im iMeta) (isi int) {
+func (icd *icFSD) loadInode(incRef int, im iMeta,
+	outdatedPaths []string, children map[string]vfs.InodeID,
+	checkTime time.Time) (isi int) {
 	jdfPath := im.jdfPath()
 	if im.dev != jdfRootDevice {
 		glog.Warningf("Nested mount point [%s] under [%s] not supported by JDFS.",
@@ -140,6 +146,18 @@ func (icd *icFSD) loadInode(im iMeta) (isi int) {
 			panic(errors.New("regInodes corrupted ?!"))
 		}
 
+		// the algorithm here may fail to discard some of the outdated paths,
+		// but they'll be realized later again anyway, no need to try very hard here.
+		for _, outdatedPath := range outdatedPaths {
+			rpl := len(ici.reachedThrough)
+			if rpl <= 0 {
+				break
+			}
+			if outdatedPath == ici.reachedThrough[rpl-1] {
+				ici.reachedThrough = ici.reachedThrough[:rpl-1]
+			}
+		}
+
 		// record reached through jdfPath
 		prevReached := false
 		for i := len(ici.reachedThrough) - 1; i >= 0; i-- {
@@ -152,9 +170,22 @@ func (icd *icFSD) loadInode(im iMeta) (isi int) {
 			ici.reachedThrough = append(ici.reachedThrough, jdfPath)
 		}
 
-		// update meta attrs
-		ici.attrs = im.attrs
-		ici.lastChecked = time.Now()
+		if checkTime.After(ici.lastChecked) {
+			// update meta attrs
+			ici.attrs = im.attrs
+			// update cached children if loaded as well
+			if children != nil {
+				ici.children = children
+				ici.lastChildrenChecked = checkTime
+			}
+			ici.lastChecked = checkTime
+		} else {
+			// an early performed fs check op arrived late, ignore
+		}
+
+		// apply reference count increment
+		ici.refcnt += incRef
+
 		return
 	}
 
@@ -170,53 +201,36 @@ func (icd *icFSD) loadInode(im iMeta) (isi int) {
 	*ici = icInode{
 		inode: im.inode, attrs: im.attrs,
 
-		// not necessarily referenced by fuse kernel,
-		// will be increased by respective ops
-		refcnt: 0,
-		// TODO this jdfs implementation prefetches children inodes aggressively,
-		//      impacts of extreme huge directories is yet to be addressed.
+		refcnt: incRef,
 
-		reachedThrough: []string{jdfPath},
-		lastChecked:    time.Now(),
-		children:       nil,
+		reachedThrough:      []string{jdfPath},
+		lastChecked:         checkTime,
+		lastChildrenChecked: checkTime,
+		children:            children,
 	}
 
 	return
 }
 
-// LoadInode loads the specified inode meta data, then returns a snapshot copy of the
-// in-core inode record, if the load was successful.
+// LoadInode loads the specified inode meta data if it is not out-dated,
+// and returns the latest snapshot copy of the in-core inode record.
+//
+// if checkTime != ici.lastChecked, the returned meta data should be more
+// recent than supplied.
 func (icd *icFSD) LoadInode(incRef int, im iMeta,
-	outdatedPaths []string, children map[string]vfs.InodeID) (ici icInode, ok bool) {
+	outdatedPaths []string, children map[string]vfs.InodeID,
+	checkTime time.Time) (ici icInode, ok bool) {
 	icd.mu.Lock()
 	defer icd.mu.Unlock()
 
-	isi := icd.loadInode(im)
+	isi := icd.loadInode(incRef, im, outdatedPaths, children, checkTime)
 	if isi < 0 {
-		return // situation should have been loaded in loadInode()
+		// ok is false to be returned
+		return // situation should have been logged in loadInode()
 	}
 
-	icip := &icd.stoInodes[isi]
-	if icip.inode != im.inode {
-		panic(errors.Errorf("inode [%v] changed to [%v] ?!", im.inode, icip.inode))
-	}
-
-	for _, outdatedPath := range outdatedPaths {
-		rpl := len(icip.reachedThrough)
-		if rpl <= 0 {
-			break
-		}
-		if outdatedPath == icip.reachedThrough[rpl-1] {
-			icip.reachedThrough = icip.reachedThrough[:rpl-1]
-		}
-	}
-
-	if children != nil {
-		icip.children = children
-	}
-
-	icip.refcnt += incRef
-	ici, ok = *icip, true
+	// take a snapshot of the inode record when mu locked for return value
+	ici, ok = icd.stoInodes[isi], true
 	return
 }
 

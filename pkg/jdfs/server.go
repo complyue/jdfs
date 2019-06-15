@@ -123,79 +123,86 @@ func (efs *exportedFileSystem) LookUpInode(parent vfs.InodeID, name string) {
 		parent = jdfRootInode
 	}
 
-	var ce *vfs.ChildInodeEntry
-
-	var fsErr error
-
-	if ici, ok := efs.icd.GetInode(parent); !ok {
-		fsErr = vfs.ENOENT
-	} else {
+	var ce vfs.ChildInodeEntry
+	fsErr := func() error {
+		ici, ok := efs.icd.GetInode(parent)
+		if !ok {
+			return vfs.ENOENT
+		}
+		// the children map won't be modified after armed to ici, no sync needed to read it
 		children := ici.children
-		if children == nil || time.Now().Sub(ici.lastChecked) > vfs.DIR_CHILDREN_CACHE_TIME {
+
+		if children == nil || time.Now().Sub(ici.lastChildrenChecked) > vfs.DIR_CHILDREN_CACHE_TIME {
 			// read dir contents from local fs, cache to children list
 			if parentM, childMs, outdatedPaths, err := readInodeDir(parent, ici.reachedThrough); err != nil {
-				fsErr = err
-			} else {
-				children = make([string]vfs.InodeID, len(childMs))
-				for i := range childMs {
-					childM := &childMs[i]
-					children[childM.name] = childM.inode
-
-					if childM.name == name {
-						if cici, ok := efs.icd.LoadInode(1, fi2im(parentM.jdfPath(), *childM), nil, nil); ok {
-							ce = &vfs.ChildInodeEntry{
-								Child:                cici.inode,
-								Generation:           0,
-								Attributes:           cici.attrs,
-								AttributesExpiration: time.Now().Add(vfs.META_ATTRS_CACHE_TIME),
-								EntryExpiration:      time.Now().Add(vfs.DIR_CHILDREN_CACHE_TIME),
-							}
-						}
-					}
-				}
-				ici = efs.icd.LoadInode(parentM, outdatedPaths, children)
+				return err
 			}
-		} else {
-			// use children list cache
-			if cInode, ok := children[name]; !ok {
-				// no child with specified name
-				fsErr = vfs.ENOENT
-			} else if cici, ok := efs.icd.GetInode(1, cInode); ok {
-				// already in-core
-				ce = &vfs.ChildInodeEntry{
-					Child:                cici.inode,
-					Generation:           0,
-					Attributes:           cici.attrs,
-					AttributesExpiration: time.Now().Add(vfs.META_ATTRS_CACHE_TIME),
-					EntryExpiration:      time.Now().Add(vfs.DIR_CHILDREN_CACHE_TIME),
-				}
-			} else {
-				// not yet in-core, consult local fs
-				if parentPath, parentM, outdatedPaths, err := statInode(
-					ici.inode, ici.reachedThrough,
-				); err != nil {
-					fsErr = err
-				} else if ici, ok := efs.icd.LoadInode(parentM, outdatedPaths, nil); ok {
-					childPath := fmt.Sprintf("%s/%s", parentPath, name)
-					if cFI, err := os.Lstat(childPath); err != nil {
-						fsErr = err
-					} else if cici, ok := efs.icd.LoadInode(1, fi2im("", cFI), nil, nil); ok {
-						ce = &vfs.ChildInodeEntry{
+			checkTime := time.Now()
+			found := false
+			children = make([string]vfs.InodeID, len(childMs))
+			for i := range childMs {
+				childM := &childMs[i]
+				children[childM.name] = childM.inode
+				if childM.name == name {
+					if cici, ok := efs.icd.LoadInode(1, *childM, nil, nil, checkTime); ok {
+						ce = vfs.ChildInodeEntry{
 							Child:                cici.inode,
 							Generation:           0,
 							Attributes:           cici.attrs,
-							AttributesExpiration: time.Now().Add(vfs.META_ATTRS_CACHE_TIME),
-							EntryExpiration:      time.Now().Add(vfs.DIR_CHILDREN_CACHE_TIME),
+							AttributesExpiration: checkTime.Add(vfs.META_ATTRS_CACHE_TIME),
+							EntryExpiration:      checkTime.Add(vfs.DIR_CHILDREN_CACHE_TIME),
 						}
+						found = true
 					}
 				}
 			}
+			if ici, ok = efs.icd.LoadInode(0, parentM, outdatedPaths, children, checkTime); !ok {
+				return vfs.ENOENT
+			}
+			if found {
+				return nil
+			}
+			return vfs.ENOENT
+		} else {
+			// use cached children map
+			if cInode, ok := children[name]; !ok {
+				return vfs.ENOENT // no child with specified name
+			}
+			if cici, ok := efs.icd.GetInode(1, cInode); ok {
+				// already in-core
+				ce = vfs.ChildInodeEntry{
+					Child:                cici.inode,
+					Generation:           0,
+					Attributes:           cici.attrs,
+					AttributesExpiration: ici.lastChecked.Add(vfs.META_ATTRS_CACHE_TIME),
+					EntryExpiration:      ici.lastChildrenChecked.Add(vfs.DIR_CHILDREN_CACHE_TIME),
+				}
+				return nil
+			}
+			// not yet in-core, consult local fs
+			if parentM, outdatedPaths, err := statInode(ici.inode, ici.reachedThrough); err != nil {
+				return err // failed stating parent dir
+			}
+			// update stat'ed parent meta data to in-core record
+			if ici, ok = efs.icd.LoadInode(0, parentM, outdatedPaths, nil, time.Now()); !ok {
+				return vfs.ENOENT // parent dir disappeared
+			}
+			childPath := parentM.jdfChildPath(name)
+			if cFI, err := os.Lstat(childPath); err != nil {
+				return err
+			} else if cici, ok := efs.icd.LoadInode(1, fi2im("", cFI), nil, nil, time.Now()); ok {
+				ce = vfs.ChildInodeEntry{
+					Child:                cici.inode,
+					Generation:           0,
+					Attributes:           cici.attrs,
+					AttributesExpiration: cici.lastChecked.Add(vfs.META_ATTRS_CACHE_TIME),
+					EntryExpiration:      cici.lastChecked.Add(vfs.DIR_CHILDREN_CACHE_TIME),
+				}
+				return nil
+			}
 		}
-	}
-
-	if fsErr == nil && ce == nil {
-		fsErr = vfs.ENOENT
-	}
+		return vfs.ENOENT
+	}()
 
 	if err := co.StartSend(); err != nil {
 		panic(err)
@@ -216,7 +223,7 @@ func (efs *exportedFileSystem) LookUpInode(parent vfs.InodeID, name string) {
 		panic(fsErr)
 	}
 
-	bufView := ((*[unsafe.Sizeof(*ce)]byte)(unsafe.Pointer(ce)))[0:unsafe.Sizeof(*ce)]
+	bufView := ((*[unsafe.Sizeof(ce)]byte)(unsafe.Pointer(&ce)))[0:unsafe.Sizeof(ce)]
 	if err := co.SendData(bufView); err != nil {
 		panic(err)
 	}
@@ -224,6 +231,7 @@ func (efs *exportedFileSystem) LookUpInode(parent vfs.InodeID, name string) {
 
 func (efs *exportedFileSystem) GetInodeAttributes(inode vfs.InodeID) {
 	co := efs.ho.Co()
+
 	if err := co.FinishRecv(); err != nil {
 		panic(err)
 	}
@@ -240,11 +248,11 @@ func (efs *exportedFileSystem) GetInodeAttributes(inode vfs.InodeID) {
 		fsErr = vfs.ENOENT
 	} else if time.Now().Sub(ici.lastChecked) > vfs.META_ATTRS_CACHE_TIME {
 		// refresh after cache time out
-		if _, inoM, outdatedPaths, err := statInode(
+		if inoM, outdatedPaths, err := statInode(
 			ici.inode, ici.reachedThrough,
 		); err != nil {
 			fsErr = err
-		} else if ici, ok = efs.icd.LoadInode(0, inoM, outdatedPaths, nil); !ok {
+		} else if ici, ok = efs.icd.LoadInode(0, inoM, outdatedPaths, nil, time.Now()); !ok {
 			fsErr = vfs.ENOENT
 		} else {
 			attrs = ici.attrs
@@ -284,6 +292,7 @@ func (efs *exportedFileSystem) SetInodeAttributes(inode vfs.InodeID,
 	sz uint64, mode uint32, mNsec int64,
 ) {
 	co := efs.ho.Co()
+
 	if err := co.FinishRecv(); err != nil {
 		panic(err)
 	}
@@ -294,41 +303,54 @@ func (efs *exportedFileSystem) SetInodeAttributes(inode vfs.InodeID,
 
 	var attrs vfs.InodeAttributes
 
-	var fsErr error
+	fsErr := func() error {
+		if ici, ok := efs.icd.GetInode(inode); !ok {
+			return vfs.ENOENT // no such inode
+		} else if inoM, outdatedPaths, err := statInode(ici.inode, ici.reachedThrough); err != nil {
+			return err // local fs error at jdfs
+		} else {
+			// update stat'ed meta data to in-core inode record
+			if ici, ok = efs.icd.LoadInode(0, inoM, outdatedPaths, nil, time.Now()); !ok {
+				return vfs.ENOENT // inode disappeared
+			}
 
-	if ici, ok := efs.icd.GetInode(inode); !ok {
-		fsErr = vfs.ENOENT
-	} else if jdfPath, inoM, outdatedPaths, err := statInode(
-		ici.inode, ici.reachedThrough,
-	); err != nil {
-		fsErr = err
-	} else if inoF, err := os.OpenFile(jdfPath, os.O_RDWR, 0); err != nil {
-		fsErr = err
-	} else {
-		defer inoF.Close()
+			// perform FUSE requested ops on local fs
+			jdfPath := inoM.jdfPath()
+			inoF, err := os.OpenFile(jdfPath, os.O_RDWR, 0)
+			if err != nil {
+				return err
+			}
+			defer inoF.Close()
 
-		if chgSize && fsErr == nil {
-			fsErr = inoF.Truncate(int64(sz))
-		}
+			if chgSize {
+				if err := inoF.Truncate(int64(sz)); err != nil {
+					return err
+				}
+			}
 
-		if chgMode && fsErr == nil {
-			fsErr = inoF.Chmod(os.FileMode(mode))
-		}
+			if chgMode {
+				if err := inoF.Chmod(os.FileMode(mode)); err != nil {
+					return err
+				}
+			}
 
-		if chgMtime && fsErr == nil {
-			fsErr = chftimes(inoF, mNsec)
-		}
+			if chgMtime {
+				if err := chftimes(inoF, mNsec); err != nil {
+					return err
+				}
+			}
 
-		if fsErr != nil { // stat local fs again for new meta attrs
+			// stat local fs again for new meta attrs
 			if inoFI, err := os.Lstat(jdfPath); err != nil {
-				fsErr = err
-			} else if ici, ok := efs.icd.LoadInode(fi2im("", inoFI), outdatedPaths, nil); !ok {
-				fsErr = vfs.ENOENT
+				return err // local fs error
+			} else if ici, ok = efs.icd.LoadInode(0, fi2im("", inoFI), nil, nil, time.Now()); !ok {
+				return vfs.ENOENT // inode disappeared
 			} else {
 				attrs = ici.attrs
+				return nil
 			}
 		}
-
+		return vfs.ENOENT
 	}
 
 	if err := co.StartSend(); err != nil {
@@ -377,38 +399,46 @@ func (efs *exportedFileSystem) MkDir(parent vfs.InodeID, name string, mode uint3
 		panic(err)
 	}
 
-	var ce *vfs.ChildInodeEntry
+	var ce vfs.ChildInodeEntry
 
-	var fsErr error
+	fsErr := func() error {
+		ici, ok := efs.icd.GetInode(parent)
+		if !ok {
+			return vfs.ENOENT
+		}
+		parentM, outdatedPaths, err := statInode(ici.inode, ici.reachedThrough)
+		if err != nil {
+			return err
+		}
+		checkTime := time.Now()
+		// update meta data of parent to it in-core inode record
+		if err = efs.icd.LoadInode(0, parentM, outdatedPaths, nil, checkTime); err != nil {
+			return err
+		}
 
-	if ici, ok := efs.icd.GetInode(parent); !ok {
-		fsErr = vfs.ENOENT
-	} else if parentPath, parentM, outdatedPaths, err := statInode(
-		ici.inode, ici.reachedThrough,
-	); err != nil {
-		fsErr = err
-	} else {
-		childPath := fmt.Sprintf("%s/%s", parentPath, name)
-		if err := os.Mkdir(childPath, os.FileMode(mode)); err != nil {
-			fsErr = err
-		} else if cFI, err := os.Lstat(childPath); err != nil {
-			fsErr = err
-		} else if cici, ok := efs.icd.LoadInode(fi2im("", cFI), nil, nil); !ok {
-			fsErr = vfs.ENOENT
+		// perform requested FUSE op on local fs
+		childPath := parentM.jdfChildPath(name)
+		if err = os.Mkdir(childPath, os.FileMode(mode)); err != nil {
+			return err
+		}
+		if cFI, err := os.Lstat(childPath); err != nil {
+			return err
+		}
+		checkTime = time.Now()
+		if cici, ok := efs.icd.LoadInode(1, fi2im("", cFI), nil, nil, checkTime); !ok {
+			return vfs.ENOENT
 		} else {
-			ce = &vfs.ChildInodeEntry{
+			ce = vfs.ChildInodeEntry{
 				Child:                cici.inode,
 				Generation:           0,
 				Attributes:           cici.attrs,
-				AttributesExpiration: time.Now().Add(vfs.META_ATTRS_CACHE_TIME),
-				EntryExpiration:      time.Now().Add(vfs.DIR_CHILDREN_CACHE_TIME),
+				AttributesExpiration: checkTime.Add(vfs.META_ATTRS_CACHE_TIME),
+				EntryExpiration:      checkTime.Add(vfs.DIR_CHILDREN_CACHE_TIME),
 			}
+			return nil
 		}
-	}
-
-	if fsErr == nil && ce == nil {
-		fsErr = vfs.ENOENT
-	}
+		return vfs.ENOENT
+	}()
 
 	if err := co.StartSend(); err != nil {
 		panic(err)
@@ -428,7 +458,7 @@ func (efs *exportedFileSystem) MkDir(parent vfs.InodeID, name string, mode uint3
 		panic(fsErr)
 	}
 
-	bufView := ((*[unsafe.Sizeof(*ce)]byte)(unsafe.Pointer(ce)))[0:unsafe.Sizeof(*ce)]
+	bufView := ((*[unsafe.Sizeof(ce)]byte)(unsafe.Pointer(&ce)))[0:unsafe.Sizeof(ce)]
 	if err := co.SendData(bufView); err != nil {
 		panic(err)
 	}
