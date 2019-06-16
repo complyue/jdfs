@@ -112,6 +112,8 @@ func (icd *icFSD) init(readOnly bool) error {
 	icd.regInodes = make(map[vfs.InodeID]int)
 	icd.stoInodes = nil
 	icd.freeInoIdxs = nil
+	icd.dirHandles = []icdHandle{icdHandle{}} // reserve 0 for nil handle
+	icd.freeDHIdxs = nil
 	icd.fileHandles = []icfHandle{icfHandle{}} // reserve 0 for nil handle
 	icd.freeFHIdxs = nil
 
@@ -410,11 +412,14 @@ func (icd *icFSD) ReleaseDirHandle(handle int) {
 
 	icdh := &icd.dirHandles[handle]
 
-	if icdh.isi <= 0 {
+	if icdh.isi < 0 {
 		panic(errors.New("releasing non-existing dir handle ?!"))
 	}
 
-	*icdh = icdHandle{} // reset fields to zero values
+	// fill fields with invalid values
+	*icdh = icdHandle{
+		isi: -1, // isi 0 is root dir, possible to be an opened dir
+	}
 
 	icd.freeDHIdxs = append(icd.freeDHIdxs, handle)
 }
@@ -482,11 +487,12 @@ func (icd *icFSD) ReleaseFileHandle(handle int) {
 
 	icfh := &icd.fileHandles[handle]
 
-	if icfh.isi <= 0 {
+	if icfh.isi <= 0 { // isi 0 is root dir, not possible to be an opened file
 		panic(errors.New("releasing non-existing file handle ?!"))
 	}
 
-	*icfh = icfHandle{} // reset fields to zero values
+	// fill fields with invalid values
+	*icfh = icfHandle{}
 
 	icd.freeFHIdxs = append(icd.freeFHIdxs, handle)
 }
