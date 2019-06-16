@@ -709,20 +709,6 @@ ReleaseDirHandle(%#v)
 		panic(err)
 	}
 
-	if err = co.StartRecv(); err != nil {
-		return err
-	}
-
-	errno, err := co.RecvObj()
-	if err != nil {
-		return err
-	}
-	if en, ok := errno.(hbi.LitIntType); !ok {
-		panic(errors.Errorf("unexpected errno type [%T] of errno value [%v]", errno, errno))
-	} else if en != 0 {
-		return syscall.Errno(en)
-	}
-
 	return
 }
 
@@ -921,20 +907,6 @@ func (fs *fileSystem) ReleaseFileHandle(
 ReleaseFileHandle(%#v)
 `, op.Handle)); err != nil {
 		panic(err)
-	}
-
-	if err = co.StartRecv(); err != nil {
-		return err
-	}
-
-	errno, err := co.RecvObj()
-	if err != nil {
-		return err
-	}
-	if en, ok := errno.(hbi.LitIntType); !ok {
-		panic(errors.Errorf("unexpected errno type [%T] of errno value [%v]", errno, errno))
-	} else if en != 0 {
-		return syscall.Errno(en)
 	}
 
 	return

@@ -95,7 +95,7 @@ func (icd *icFSD) init(readOnly bool) error {
 		// TODO test JDFS mount root dir writable
 	}
 
-	rootM := fi2im("", rootFI)
+	rootM := fi2im(".", rootFI)
 
 	icd.mu.Lock()
 	defer icd.mu.Unlock()
@@ -132,7 +132,7 @@ func (icd *icFSD) init(readOnly bool) error {
 func (icd *icFSD) loadInode(incRef int, im iMeta,
 	outdatedPaths []string, children map[string]vfs.InodeID,
 	checkTime time.Time) (isi int) {
-	jdfPath := im.jdfPath()
+	jdfPath := im.jdfPath
 	if im.dev != jdfRootDevice {
 		glog.Warningf("Nested mount point [%s] under [%s] not supported by JDFS.",
 			jdfPath, jdfsRootPath)

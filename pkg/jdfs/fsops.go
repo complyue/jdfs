@@ -32,28 +32,19 @@ var (
 )
 
 type iMeta struct {
-	parentPath string
-	name       string
+	jdfPath string
+	name    string
 
 	dev   int64
 	inode vfs.InodeID
 	attrs vfs.InodeAttributes
 }
 
-func (im iMeta) jdfPath() string {
-	if len(im.parentPath) > 0 {
-		return fmt.Sprintf("%s/%s", im.parentPath, im.name)
-	}
-	return im.name
-}
-
-func (im iMeta) jdfChildPath(name string) string {
-	if len(im.parentPath) > 0 { // normal case
-		return fmt.Sprintf("%s/%s/%s", im.parentPath, im.name, name)
-	} else if name == "." { // direct child of JDFS mount root
+func (im iMeta) childPath(name string) string {
+	if len(im.jdfPath) > 0 && im.jdfPath != "." {
+		return fmt.Sprintf("%s/%s", im.jdfPath, name)
+	} else { // 1st level child of root dir
 		return name
-	} else { // deeper child
-		return fmt.Sprintf("%s/%s", im.name, name)
 	}
 }
 
@@ -84,7 +75,7 @@ func statInode(inode vfs.InodeID, reachedThrough []string) (
 			continue
 		}
 
-		if im := fi2im("", inoFI); im.inode != inode {
+		if im := fi2im(jdfPath, inoFI); im.inode != inode {
 			if inode == vfs.RootInodeID && im.inode == jdfRootInode {
 				// fake mounted JDFS root inode to be constant 1
 				im.inode = vfs.RootInodeID
@@ -127,7 +118,7 @@ func readInodeDir(parentInode vfs.InodeID, reachedThrough []string) (
 		return
 	}
 
-	parentPath := parentM.jdfPath()
+	parentPath := parentM.jdfPath
 	parentDir, err = os.OpenFile(parentPath, os.O_RDONLY, 0)
 	if err != nil {
 		return
@@ -157,7 +148,7 @@ func readInodeDir(parentInode vfs.InodeID, reachedThrough []string) (
 			continue
 		}
 
-		if childM = fi2im(parentPath, childFI); childM.dev != jdfRootDevice {
+		if childM = fi2im(parentM.childPath(childFI.Name()), childFI); childM.dev != jdfRootDevice {
 			glog.V(1).Infof("jdfs [%s]:[%s]/[%s] not on same local fs, not revealed to jdfc.",
 				jdfsRootPath, parentPath, childFI.Name())
 			continue

@@ -11,29 +11,31 @@ import (
 func statFS(rootDir *os.File) (op vfs.StatFSOp, err error) {
 
 	// TODO syscall.Fstatfs is missing as of Go1.12.5,
-	//      figure out how to support this
+	//      figure out how to support this,
+	//      maybe solaris support statfs through CRT lib calls,
+	//      maybe cgo is needed.
 
 	return
 }
 
-func fi2im(parentPath string, fi os.FileInfo) iMeta {
+func fi2im(jdfPath string, fi os.FileInfo) iMeta {
 	sd, ok := fi.Sys().(*syscall.Stat_t)
 	if !ok {
 		panic(errors.Errorf("Incompatible local file: [%s]", fi.Name))
 	}
 	return iMeta{
-		parentPath: parentPath, name: fi.Name(),
+		jdfPath: jdfPath, name: fi.Name(),
 
 		dev: int64(sd.Dev), inode: InodeID(sd.Ino),
 		attrs: InodeAttributes{
+			Size:   fi.Size(),
 			Nlink:  uint32(sd.Nlink),
-			Mode:   os.FileMode(sd.Mode),
+			Mode:   fi.Mode(),
 			Atime:  ts2t(sd.Atim),
 			Mtime:  ts2t(sd.Mtim),
 			Ctime:  ts2t(sd.Ctim),
 			Crtime: ts2t(sd.Ctim),
-
-			Uid: sd.Uid, Gid: sd.Gid,
+			Uid:    sd.Uid, Gid: sd.Gid,
 		},
 	}
 }

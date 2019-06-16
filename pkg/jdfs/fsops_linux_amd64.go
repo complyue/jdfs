@@ -26,14 +26,14 @@ func statFS(rootDir *os.File) (op vfs.StatFSOp, err error) {
 	return
 }
 
-func fi2im(parentPath string, fi os.FileInfo) iMeta {
+func fi2im(jdfPath string, fi os.FileInfo) iMeta {
 	sd, ok := fi.Sys().(*syscall.Stat_t)
 	if !ok {
 		panic(errors.Errorf("Incompatible local file: [%s]", fi.Name))
 	}
 
 	return iMeta{
-		parentPath: parentPath, name: fi.Name(),
+		jdfPath: jdfPath, name: fi.Name(),
 
 		dev: int64(sd.Dev), inode: vfs.InodeID(sd.Ino),
 		attrs: vfs.InodeAttributes{
