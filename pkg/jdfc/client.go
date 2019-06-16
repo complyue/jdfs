@@ -57,15 +57,6 @@ func MountJDFS(
 		readOnly: cfg.ReadOnly,
 		jdfPath:  jdfPath,
 	}
-	mfs, err := fuse.Mount(mountpoint, &fileSystemServer{fs: fs}, cfg)
-	if err != nil {
-		return err
-	}
-
-	if p := mfs.Protocol(); !p.HasInvalidate() {
-		err = errors.Errorf("FUSE kernel version %v not supported", p)
-		return
-	}
 
 	// prepare the hosting environment to be reacting to jdfs
 	he := hbi.NewHostingEnv()
@@ -95,6 +86,16 @@ func MountJDFS(
 
 	if err = dialHBI(); err != nil {
 		return err
+	}
+
+	mfs, err := fuse.Mount(mountpoint, &fileSystemServer{fs: fs}, cfg)
+	if err != nil {
+		return err
+	}
+
+	if p := mfs.Protocol(); !p.HasInvalidate() {
+		err = errors.Errorf("FUSE kernel version %v not supported", p)
+		return
 	}
 
 	if err = mfs.Join(context.Background()); err != nil {
@@ -168,10 +169,12 @@ Mount(%#v, %#v)
 		return
 	}(); err != nil {
 		fs.po, fs.ho = nil, nil
-		glog.Errorf("jdfs mount failed: %+v", err)
+		glog.Errorf("JDFS mount failed: %+v", err)
 		if !po.Disconnected() {
 			po.Disconnect(fmt.Sprintf("server mount failed: %v", err), false)
 		}
+		// TODO handle this failure, reconnect or unmount ?
+		os.Exit(7) // fail hard for now
 	}
 }
 

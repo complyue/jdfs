@@ -57,7 +57,8 @@ func (efs *exportedFileSystem) NamesToExpose() []string {
 	return []string{
 		"Mount", "StatFS", "LookUpInode", "GetInodeAttributes", "SetInodeAttributes", "ForgetInode",
 		"MkDir", "CreateFile", "CreateSymlink", "CreateLink", "Rename", "RmDir", "Unlink",
-		"OpenDir", "ReadDir", "ReleaseDirHandle",
+		"OpenDir", "ReadDir", "ReleaseDirHandle", "OpenFile", "ReadFile", "WriteFile", "SyncFile",
+		"ReleaseFileHandle", "ReadSymlink",
 	}
 }
 

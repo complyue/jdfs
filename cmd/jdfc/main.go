@@ -81,10 +81,10 @@ Simple usage:
 		// jdfs url specified on cmdl
 		jdfsURL, err = url.Parse(urlArg)
 		if err != nil {
-			log.Fatalf("Failed parsing JDFS url [%s] - %+v", urlArg, err)
+			log.Fatalf("Failed parsing jdfs url [%s] - %+v", urlArg, err)
 		}
 		if jdfsURL.IsAbs() && "jdfs" != jdfsURL.Scheme {
-			log.Fatalf("Invalid JDFS url: [%s]", urlArg)
+			log.Fatalf("Invalid jdfs url: [%s]", urlArg)
 		}
 		jdfsHostName = jdfsURL.Hostname()
 		jdfsPort = jdfsURL.Port()
@@ -120,7 +120,7 @@ Simple usage:
 					if mpRel, err := filepath.Rel(atDir, mpFullPath); err != nil {
 						log.Fatalf("Can not determine relative path from [%s] to [%s]", atDir, mpFullPath)
 					} else {
-						glog.V(1).Infof("Using relative path [%s] appended to root JDFS url [%s] configured in [%s]", mpRel, magicRoot, magicFn)
+						glog.V(1).Infof("Using relative path [%s] appended to root jdfs url [%s] configured in [%s]", mpRel, magicRoot, magicFn)
 						if len(jdfsRootURL.Path) <= 0 {
 							jdfPath = "/" + mpRel
 						} else {
@@ -177,7 +177,7 @@ Simple usage:
 	}
 
 	cfg := &fuse.MountConfig{
-		Subtype:  "jdfs",
+		Subtype:  "jdf",
 		FSName:   fsName,
 		ReadOnly: readOnly,
 

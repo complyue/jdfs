@@ -79,12 +79,6 @@ type icFSD struct {
 }
 
 func (icd *icFSD) init(readOnly bool) error {
-	var flags int
-	if readOnly {
-		flags = os.O_RDONLY
-	} else {
-		flags = os.O_RDWR
-	}
 	if err := os.Chdir(jdfsRootPath); err != nil {
 		return errors.Errorf("Error chdir to jdfs path: [%s] - %+v", jdfsRootPath, err)
 	}
@@ -92,9 +86,13 @@ func (icd *icFSD) init(readOnly bool) error {
 	if err != nil {
 		return errors.Errorf("Bad jdfs path: [%s] - %+v", jdfsRootPath, err)
 	}
-	rootDir, err := os.OpenFile(".", flags, 0)
+	// dir can only be opened readonly
+	rootDir, err := os.OpenFile(".", os.O_RDONLY, 0)
 	if err != nil {
 		return errors.Errorf("Error open jdfs path: [%s] - %+v", jdfsRootPath, err)
+	}
+	if !readOnly {
+		// TODO test JDFS mount root dir writable
 	}
 
 	rootM := fi2im("", rootFI)

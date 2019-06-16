@@ -1,6 +1,7 @@
 package jdfs
 
 import (
+	"flag"
 	"fmt"
 	"net"
 	"os"
@@ -10,13 +11,26 @@ import (
 	"github.com/complyue/hbi/mp"
 )
 
+var (
+	soloMode bool
+)
+
+func init() {
+	flag.BoolVar(&soloMode, "solo", false, "run jdfs in solo mode (no subprocess spawning) for easy debug")
+}
+
 // ExportTCP exports the specified root directory from local filesystem,
 // with this dir and any sub directory under it (only if belongs to the same
 // local filesystem) mountable as JDFS over TCP network, at the specified TCP
 // service address.
 func ExportTCP(exportRoot string, servAddr string) (err error) {
 
-	if err = mp.UpstartTCP(servAddr, func() *hbi.HostingEnv {
+	servMethod := mp.UpstartTCP
+	if soloMode { // should run in solo mode only for debug purpose
+		servMethod = hbi.ServeTCP
+	}
+
+	if err = servMethod(servAddr, func() *hbi.HostingEnv {
 		he := hbi.NewHostingEnv()
 
 		interop.ExposeInterOpValues(he)

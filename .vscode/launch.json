@@ -9,16 +9,29 @@
             "program": "${file}"
         },
         {
+            "name": "jdfs",
+            "type": "go",
+            "request": "launch",
+            "mode": "debug",
+            "program": "${workspaceFolder}/cmd/jdfs",
+            "env": {},
+            "args": [
+                "-v=3",
+                "-solo",
+                "/tmp/jdf"
+            ]
+        },
+        {
             "name": "jdfc",
             "type": "go",
             "request": "launch",
-            "mode": "auto",
+            "mode": "debug",
             "program": "${workspaceFolder}/cmd/jdfc",
             "env": {},
             "args": [
                 "-v=3",
-                "jdf://localhost:1113",
-                "/mnt/jdfs/"
+                "jdfs://localhost/",
+                "/mnt/jdf/"
             ]
         }
     ]
