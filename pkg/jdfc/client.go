@@ -296,10 +296,7 @@ func (fs *fileSystem) SetInodeAttributes(
 	}
 
 	if err = co.SendCode(fmt.Sprintf(`
-SetInodeAttributes(%#v,
-%#v, %#v, %#v,
-%#v, %#v, %#v,
-)
+SetInodeAttributes(%#v,%#v, %#v, %#v,%#v, %#v, %#v)
 `, op.Inode,
 		op.Size != nil, op.Mode != nil, op.Mtime != nil,
 		chgSizeTo, chgModeTo, chgMtimeToNsec,
