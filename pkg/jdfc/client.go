@@ -8,7 +8,6 @@ import (
 	"os"
 	"sync"
 	"syscall"
-	"time"
 	"unsafe"
 
 	"github.com/golang/glog"
@@ -269,7 +268,6 @@ GetInodeAttributes(%#v)
 	if err = co.RecvData(bufView); err != nil {
 		return err
 	}
-	op.AttributesExpiration = time.Now().Add(vfs.META_ATTRS_CACHE_TIME)
 	return
 }
 
@@ -295,7 +293,7 @@ func (fs *fileSystem) SetInodeAttributes(
 		chgModeTo = uint32(*op.Mode)
 	}
 	if op.Mtime != nil {
-		chgMtimeToNsec = op.Mtime.UnixNano()
+		chgMtimeToNsec = *op.Mtime
 	}
 
 	if err = co.SendCode(fmt.Sprintf(`
@@ -324,7 +322,6 @@ SetInodeAttributes(%#v,
 	if err = co.RecvData(bufView); err != nil {
 		return err
 	}
-	op.AttributesExpiration = time.Now().Add(vfs.META_ATTRS_CACHE_TIME)
 
 	return
 }

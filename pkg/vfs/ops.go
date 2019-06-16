@@ -16,7 +16,6 @@ package vfs
 
 import (
 	"os"
-	"time"
 )
 
 ////////////////////////////////////////////////////////////////////////
@@ -130,11 +129,8 @@ type GetInodeAttributesOp struct {
 	// The inode of interest.
 	Inode InodeID
 
-	// Set by the file system: attributes for the inode, and the time at which
-	// they should expire. See notes on ChildInodeEntry.AttributesExpiration for
-	// more.
-	Attributes           InodeAttributes
-	AttributesExpiration time.Time
+	// Set by the file system: attributes for the inode.
+	Attributes InodeAttributes
 }
 
 // Change attributes for an inode.
@@ -148,14 +144,11 @@ type SetInodeAttributesOp struct {
 	// The attributes to modify, or nil for attributes that don't need a change.
 	Size  *uint64
 	Mode  *os.FileMode
-	Atime *time.Time
-	Mtime *time.Time
+	Atime *int64
+	Mtime *int64
 
-	// Set by the file system: the new attributes for the inode, and the time at
-	// which they should expire. See notes on
-	// ChildInodeEntry.AttributesExpiration for more.
-	Attributes           InodeAttributes
-	AttributesExpiration time.Time
+	// Set by the file system: the new attributes for the inode.
+	Attributes InodeAttributes
 }
 
 // Decrement the reference count for an inode ID previously issued by the file

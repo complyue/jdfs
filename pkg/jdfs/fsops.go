@@ -162,6 +162,6 @@ func readInodeDir(parentInode vfs.InodeID, reachedThrough []string) (
 	return
 }
 
-func ts2t(ts syscall.Timespec) time.Time {
-	return time.Unix(ts.Sec, ts.Nsec)
+func ts2t(ts syscall.Timespec) int64 {
+	return int64(int64(ts.Sec)*int64(time.Second) + ts.Nsec)
 }

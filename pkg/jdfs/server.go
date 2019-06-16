@@ -149,11 +149,9 @@ func (efs *exportedFileSystem) LookUpInode(parent vfs.InodeID, name string) {
 				if childM.name == name {
 					if cici, ok := efs.icd.LoadInode(1, *childM, nil, nil, checkTime); ok {
 						ce = vfs.ChildInodeEntry{
-							Child:                cici.inode,
-							Generation:           0,
-							Attributes:           cici.attrs,
-							AttributesExpiration: checkTime.Add(vfs.META_ATTRS_CACHE_TIME),
-							EntryExpiration:      checkTime.Add(vfs.DIR_CHILDREN_CACHE_TIME),
+							Child:      cici.inode,
+							Generation: 0,
+							Attributes: cici.attrs,
 						}
 						found = true
 					}
@@ -175,11 +173,9 @@ func (efs *exportedFileSystem) LookUpInode(parent vfs.InodeID, name string) {
 			if cici, ok := efs.icd.GetInode(1, cInode); ok {
 				// already in-core
 				ce = vfs.ChildInodeEntry{
-					Child:                cici.inode,
-					Generation:           0,
-					Attributes:           cici.attrs,
-					AttributesExpiration: ici.lastChecked.Add(vfs.META_ATTRS_CACHE_TIME),
-					EntryExpiration:      ici.lastChildrenChecked.Add(vfs.DIR_CHILDREN_CACHE_TIME),
+					Child:      cici.inode,
+					Generation: 0,
+					Attributes: cici.attrs,
 				}
 				return nil
 			}
@@ -197,11 +193,9 @@ func (efs *exportedFileSystem) LookUpInode(parent vfs.InodeID, name string) {
 				return err
 			} else if cici, ok := efs.icd.LoadInode(1, fi2im("", cFI), nil, nil, time.Now()); ok {
 				ce = vfs.ChildInodeEntry{
-					Child:                cici.inode,
-					Generation:           0,
-					Attributes:           cici.attrs,
-					AttributesExpiration: cici.lastChecked.Add(vfs.META_ATTRS_CACHE_TIME),
-					EntryExpiration:      cici.lastChecked.Add(vfs.DIR_CHILDREN_CACHE_TIME),
+					Child:      cici.inode,
+					Generation: 0,
+					Attributes: cici.attrs,
 				}
 				return nil
 			}
@@ -434,11 +428,9 @@ func (efs *exportedFileSystem) MkDir(parent vfs.InodeID, name string, mode uint3
 		} else {
 			efs.icd.InvalidateChildren(ici.inode, "", name)
 			ce = vfs.ChildInodeEntry{
-				Child:                cici.inode,
-				Generation:           0,
-				Attributes:           cici.attrs,
-				AttributesExpiration: checkTime.Add(vfs.META_ATTRS_CACHE_TIME),
-				EntryExpiration:      checkTime.Add(vfs.DIR_CHILDREN_CACHE_TIME),
+				Child:      cici.inode,
+				Generation: 0,
+				Attributes: cici.attrs,
 			}
 			return nil
 		}
@@ -523,11 +515,9 @@ func (efs *exportedFileSystem) CreateFile(parent vfs.InodeID, name string, mode 
 		efs.icd.InvalidateChildren(ici.inode, "", name)
 
 		ce = vfs.ChildInodeEntry{
-			Child:                cici.inode,
-			Generation:           0,
-			Attributes:           cici.attrs,
-			AttributesExpiration: checkTime.Add(vfs.META_ATTRS_CACHE_TIME),
-			EntryExpiration:      checkTime.Add(vfs.DIR_CHILDREN_CACHE_TIME),
+			Child:      cici.inode,
+			Generation: 0,
+			Attributes: cici.attrs,
 		}
 
 		if handle, err = efs.icd.CreateFileHandle(cici.inode, cF); err != nil {
@@ -601,11 +591,9 @@ func (efs *exportedFileSystem) CreateSymlink(parent vfs.InodeID, name string, ta
 		} else {
 			efs.icd.InvalidateChildren(ici.inode, "", name)
 			ce = vfs.ChildInodeEntry{
-				Child:                cici.inode,
-				Generation:           0,
-				Attributes:           cici.attrs,
-				AttributesExpiration: checkTime.Add(vfs.META_ATTRS_CACHE_TIME),
-				EntryExpiration:      checkTime.Add(vfs.DIR_CHILDREN_CACHE_TIME),
+				Child:      cici.inode,
+				Generation: 0,
+				Attributes: cici.attrs,
 			}
 			return nil
 		}
@@ -682,11 +670,9 @@ func (efs *exportedFileSystem) CreateLink(parent vfs.InodeID, name string, targe
 		} else {
 			efs.icd.InvalidateChildren(ici.inode, "", name)
 			ce = vfs.ChildInodeEntry{
-				Child:                cici.inode,
-				Generation:           0,
-				Attributes:           cici.attrs,
-				AttributesExpiration: checkTime.Add(vfs.META_ATTRS_CACHE_TIME),
-				EntryExpiration:      checkTime.Add(vfs.DIR_CHILDREN_CACHE_TIME),
+				Child:      cici.inode,
+				Generation: 0,
+				Attributes: cici.attrs,
 			}
 			return nil
 		}

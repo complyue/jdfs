@@ -87,12 +87,12 @@ func convertInMessage(
 		}
 
 		if valid&SetattrAtime != 0 {
-			t := time.Unix(int64(in.Atime), int64(in.AtimeNsec))
+			t := int64(in.Atime)*1e9 + int64(in.AtimeNsec)
 			to.Atime = &t
 		}
 
 		if valid&SetattrMtime != 0 {
-			t := time.Unix(int64(in.Mtime), int64(in.MtimeNsec))
+			t := int64(in.Mtime)*1e9 + int64(in.MtimeNsec)
 			to.Mtime = &t
 		}
 
@@ -647,15 +647,15 @@ func (c *Connection) kernelResponseForOp(
 	case *GetInodeAttributesOp:
 		size := int(AttrOutSize(c.protocol))
 		out := (*AttrOut)(m.Grow(size))
-		out.AttrValid, out.AttrValidNsec = convertExpirationTime(
-			o.AttributesExpiration)
+		out.AttrValid = uint64(META_ATTRS_CACHE_TIME / time.Second)
+		out.AttrValidNsec = uint32(META_ATTRS_CACHE_TIME % time.Second)
 		convertAttributes(o.Inode, &o.Attributes, &out.Attr)
 
 	case *SetInodeAttributesOp:
 		size := int(AttrOutSize(c.protocol))
 		out := (*AttrOut)(m.Grow(size))
-		out.AttrValid, out.AttrValidNsec = convertExpirationTime(
-			o.AttributesExpiration)
+		out.AttrValid = uint64(META_ATTRS_CACHE_TIME / time.Second)
+		out.AttrValidNsec = uint32(META_ATTRS_CACHE_TIME % time.Second)
 		convertAttributes(o.Inode, &o.Attributes, &out.Attr)
 
 	case *MkDirOp:
@@ -822,8 +822,7 @@ func (c *Connection) kernelResponseForOp(
 // General conversions
 ////////////////////////////////////////////////////////////////////////
 
-func convertTime(t time.Time) (secs uint64, nsec uint32) {
-	totalNano := t.UnixNano()
+func convertTime(totalNano int64) (secs uint64, nsec uint32) {
 	secs = uint64(totalNano / 1e9)
 	nsec = uint32(totalNano % 1e9)
 	return
@@ -867,29 +866,15 @@ func convertAttributes(
 	}
 }
 
-// Convert an absolute cache expiration time to a relative time from now for
-// consumption by the fuse kernel module.
-func convertExpirationTime(t time.Time) (secs uint64, nsecs uint32) {
-	// Fuse represents durations as unsigned 64-bit counts of seconds and 32-bit
-	// counts of nanoseconds (cf. http://goo.gl/EJupJV). So negative durations
-	// are right out. There is no need to cap the positive magnitude, because
-	// 2^64 seconds is well longer than the 2^63 ns range of time.Duration.
-	d := t.Sub(time.Now())
-	if d > 0 {
-		secs = uint64(d / time.Second)
-		nsecs = uint32((d % time.Second) / time.Nanosecond)
-	}
-
-	return
-}
-
 func convertChildInodeEntry(
 	in *ChildInodeEntry,
 	out *EntryOut) {
 	out.Nodeid = uint64(in.Child)
 	out.Generation = uint64(in.Generation)
-	out.EntryValid, out.EntryValidNsec = convertExpirationTime(in.EntryExpiration)
-	out.AttrValid, out.AttrValidNsec = convertExpirationTime(in.AttributesExpiration)
+	out.EntryValid = uint64(DIR_CHILDREN_CACHE_TIME / time.Second)
+	out.EntryValidNsec = uint32(DIR_CHILDREN_CACHE_TIME % time.Second)
+	out.AttrValid = uint64(META_ATTRS_CACHE_TIME / time.Second)
+	out.AttrValidNsec = uint32(META_ATTRS_CACHE_TIME % time.Second)
 
 	convertAttributes(in.Child, &in.Attributes, &out.Attr)
 }
