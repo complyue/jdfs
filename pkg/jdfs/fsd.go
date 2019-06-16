@@ -392,7 +392,8 @@ func (icd *icFSD) GetDirHandle(inode vfs.InodeID, handle int) (icdh icdHandle, e
 	// destroyed before read, but just in case.
 	icdh = icd.dirHandles[handle]
 
-	if icdh.isi <= 0 {
+	if icdh.isi < 0 { // isi 0 is root dir, possible to be an opened dir,
+		// released handles will have isi filled with -1
 		err = vfs.ENOENT
 		return
 	}
@@ -467,7 +468,7 @@ func (icd *icFSD) GetFileHandle(inode vfs.InodeID, handle int) (icfh icfHandle, 
 	// destroyed before read, but just in case.
 	icfh = icd.fileHandles[handle]
 
-	if icfh.isi <= 0 {
+	if icfh.isi <= 0 { // isi 0 is root dir, not possible to be an opened file
 		err = vfs.ENOENT
 		return
 	}
