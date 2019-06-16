@@ -955,28 +955,29 @@ ReadSymlink(%#v)
 func (fs *fileSystem) RemoveXattr(
 	ctx context.Context,
 	op *vfs.RemoveXattrOp) (err error) {
-	err = vfs.ENOSYS
+	err = vfs.ENOATTR
 	return
 }
 
 func (fs *fileSystem) GetXattr(
 	ctx context.Context,
 	op *vfs.GetXattrOp) (err error) {
-	err = vfs.ENOSYS
+	err = vfs.ENOATTR
 	return
 }
 
 func (fs *fileSystem) ListXattr(
 	ctx context.Context,
 	op *vfs.ListXattrOp) (err error) {
-	err = vfs.ENOSYS
+	// leave the op as-is, to carry zero data to return
 	return
 }
 
 func (fs *fileSystem) SetXattr(
 	ctx context.Context,
 	op *vfs.SetXattrOp) (err error) {
-	err = vfs.ENOSYS
+	// allow no space consumption
+	err = syscall.ENOSPC
 	return
 }
 
