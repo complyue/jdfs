@@ -121,7 +121,6 @@ func (icd *icFSD) init(readOnly bool) error {
 	if isi != 0 {
 		panic("root inode got isi other than zero ?!?")
 	}
-	ici := &icd.stoInodes[isi]
 
 	return nil
 }
@@ -346,43 +345,20 @@ func (icd *icFSD) GetInode(incRef int, inode vfs.InodeID) (ici icInode, ok bool)
 	return
 }
 
-func (icd *icFSD) OpenDir(inode vfs.InodeID) (handle vfs.HandleID, err error) {
+func (icd *icFSD) CreateDirHandle(inode vfs.InodeID, entries []vfs.DirEnt) (handle vfs.HandleID, err error) {
 	icd.mu.Lock()
 	defer icd.mu.Unlock()
 
 	isi, ok := icd.regInodes[inode]
 	if !ok {
-		panic(errors.Errorf("inode [%v] not in-core ?!", inode))
+		glog.V(1).Infof("inode not in-core [%v]", inode)
+		err = vfs.ENOENT
+		return
 	}
 	ici := &icd.stoInodes[isi]
-
-	var entries []vfs.DirEnt
-	if len(ici.children) > 0 { // use previous size of children for cap hint
-		entries = make([]vfs.DirEnt, 0, len(ici.children))
-	}
-
-	// snapshot dir entries at open
-	// TODO out-of-core handling necessary ?
-	if err = ici.refreshChildren(icd, false, nil, func(childName string, cisi int) {
-		cici := &icd.stoInodes[cisi]
-		entType := vfs.DT_Unknown
-		if cici.attrs.Mode.IsDir() {
-			entType = vfs.DT_Directory
-		} else if cici.attrs.Mode.IsRegular() {
-			entType = vfs.DT_File
-		} else if cici.attrs.Mode&os.ModeSymlink != 0 {
-			entType = vfs.DT_Link
-		} else {
-			return // hide this strange inode to jdfc
-		}
-		entries = append(entries, vfs.DirEnt{
-			Offset: vfs.DirOffset(len(entries) + 1),
-			Inode:  cici.inode,
-			Name:   childName,
-			Type:   entType,
-		})
-	}); err != nil {
-		glog.Warningf("inode lost [%v] - %+v", ici.inode, err)
+	if ici.inode != inode {
+		glog.Errorf("inode disappeared [%v] ?!", inode)
+		err = vfs.ENOENT
 		return
 	}
 
@@ -404,23 +380,23 @@ func (icd *icFSD) OpenDir(inode vfs.InodeID) (handle vfs.HandleID, err error) {
 	return
 }
 
-func (icd *icFSD) ReadDir(inode vfs.InodeID, handle int, offset int, buf []byte) (bytesRead int, err error) {
+func (icd *icFSD) GetDirHandle(inode vfs.InodeID, handle int) (icdh icdHandle, err error) {
 	icd.mu.Lock()
 	defer icd.mu.Unlock()
 
-	icdh := &icd.dirHandles[handle]
+	// snapshot the value instead of getting a pointer, tho it's unlikely the handle be
+	// destroyed before read, but just in case.
+	icdh = icd.dirHandles[handle]
+
+	if icdh.isi <= 0 {
+		err = vfs.ENOENT
+		return
+	}
+
 	ici := &icd.stoInodes[icdh.isi]
 	if ici.inode != inode {
 		err = syscall.ESTALE // TODO fuse kernel is happy with this ?
 		return
-	}
-
-	for i := offset; i < len(icdh.entries); i++ {
-		n := vfs.Writevfs.DirEnt(buf[bytesRead:], icdh.entries[i])
-		if n <= 0 {
-			break
-		}
-		bytesRead += n
 	}
 
 	return
@@ -430,72 +406,85 @@ func (icd *icFSD) ReleaseDirHandle(handle int) {
 	icd.mu.Lock()
 	defer icd.mu.Unlock()
 
-	if icd.dirHandles[handle].isi <= 0 {
+	icdh := &icd.dirHandles[handle]
+
+	if icdh.isi <= 0 {
 		panic(errors.New("releasing non-existing dir handle ?!"))
 	}
 
-	icd.dirHandles[handle] = icdHandle{} // reset fields to zero values
+	*icdh = icdHandle{} // reset fields to zero values
 
 	icd.freeDHIdxs = append(icd.freeDHIdxs, handle)
 }
 
-func (icd *icFSD) OpenFile(inode vfs.InodeID, flags uint32) (handle vfs.HandleID, err error) {
+func (icd *icFSD) CreateFileHandle(inode vfs.InodeID, inoF *os.File) (handle vfs.HandleID, err error) {
 	icd.mu.Lock()
 	defer icd.mu.Unlock()
 
 	isi, ok := icd.regInodes[inode]
 	if !ok {
-		panic(errors.Errorf("inode [%v] not in-core ?!", inode))
-	}
-	ici := &icd.stoInodes[isi]
-
-	if err = ici.refreshInode(icd, (flags&uint32(os.O_RDWR|os.O_WRONLY)) != 0,
-		func(inoPath string, inoF *os.File, inoFI os.FileInfo) (keepF bool, err error) {
-
-			if !inoFI.Mode().IsRegular() {
-				err = syscall.EINVAL // TODO fuse kernel happy with this ?
-				return
-			}
-
-			keepF = true
-
-			var hsi int
-			if nFreeHdls := len(icd.freeFHIdxs); nFreeHdls > 0 {
-				hsi = icd.freeFHIdxs[nFreeHdls-1]
-				icd.freeFHIdxs = icd.freeFHIdxs[:nFreeHdls-1]
-				icd.fileHandles[hsi] = icfHandle{
-					isi: isi, f: inoF,
-				}
-			} else {
-				hsi = len(icd.fileHandles)
-				icd.fileHandles = append(icd.fileHandles, icfHandle{
-					isi: isi, f: inoF,
-				})
-			}
-			handle = vfs.HandleID(hsi)
-
-			return
-		}); err != nil {
+		glog.V(1).Infof("inode not in-core [%v]", inode)
+		err = vfs.ENOENT
 		return
 	}
+	ici := &icd.stoInodes[isi]
+	if ici.inode != inode {
+		glog.Errorf("inode disappeared [%v] ?!", inode)
+		err = vfs.ENOENT
+		return
+	}
+
+	var hsi int
+	if nFreeHdls := len(icd.freeFHIdxs); nFreeHdls > 0 {
+		hsi = icd.freeFHIdxs[nFreeHdls-1]
+		icd.freeFHIdxs = icd.freeFHIdxs[:nFreeHdls-1]
+		icd.fileHandles[hsi] = icfHandle{
+			isi: isi, f: inoF,
+		}
+	} else {
+		hsi = len(icd.fileHandles)
+		icd.fileHandles = append(icd.fileHandles, icfHandle{
+			isi: isi, f: inoF,
+		})
+	}
+	handle = vfs.HandleID(hsi)
 
 	return
 }
 
-func (icd *icFSD) ReadFile(inode vfs.InodeID, handle int, offset int64, buf []byte) (bytesRead int, err error) {
+func (icd *icFSD) GetFileHandle(inode vfs.InodeID, handle int) (icfh icfHandle, err error) {
 	icd.mu.Lock()
 	defer icd.mu.Unlock()
 
-	icfh := &icd.fileHandles[handle]
+	// snapshot the value instead of getting a pointer, tho it's unlikely the handle be
+	// destroyed before read, but just in case.
+	icfh = icd.fileHandles[handle]
+
+	if icfh.isi <= 0 {
+		err = vfs.ENOENT
+		return
+	}
+
 	ici := &icd.stoInodes[icfh.isi]
 	if ici.inode != inode {
 		err = syscall.ESTALE // TODO fuse kernel is happy with this ?
 		return
 	}
 
-	if bytesRead, err = icfh.f.ReadAt(buf, offset); err != nil {
-		return
+	return
+}
+
+func (icd *icFSD) ReleaseFileHandle(handle int) {
+	icd.mu.Lock()
+	defer icd.mu.Unlock()
+
+	icfh := &icd.fileHandles[handle]
+
+	if icfh.isi <= 0 {
+		panic(errors.New("releasing non-existing file handle ?!"))
 	}
 
-	return
+	*icfh = icfHandle{} // reset fields to zero values
+
+	icd.freeFHIdxs = append(icd.freeFHIdxs, handle)
 }

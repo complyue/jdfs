@@ -59,6 +59,7 @@ func (im iMeta) jdfChildPath(name string) string {
 
 func statInode(inode vfs.InodeID, reachedThrough []string) (
 	inoM iMeta, outdatedPaths []string, err error) {
+	ok := false
 
 	for iPath := len(reachedThrough) - 1; iPath >= 0; //
 	outdatedPaths, iPath = append(outdatedPaths, reachedThrough[iPath]), iPath-1 {
@@ -66,7 +67,7 @@ func statInode(inode vfs.InodeID, reachedThrough []string) (
 		jdfPath := reachedThrough[iPath]
 		var inoFI os.FileInfo
 		if inoFI, err = os.Lstat(jdfPath); err != nil {
-			glog.V(1).Warningf("jdfs [%s]:[%s] disappeared - %+v", jdfsRootPath, jdfPath, err)
+			glog.V(1).Infof("jdfs [%s]:[%s] disappeared - %+v", jdfsRootPath, jdfPath, err)
 			continue
 		}
 
@@ -78,31 +79,30 @@ func statInode(inode vfs.InodeID, reachedThrough []string) (
 			// a symlink
 		} else {
 			// a file not reigned by JDFS
-			glog.V(1).Warningf("jdfs [%s]:[%s] with file mode [%#o] not revealed to jdfc.",
+			glog.V(1).Infof("jdfs [%s]:[%s] with file mode [%#o] not revealed to jdfc.",
 				jdfsRootPath, jdfPath, inoFI.Mode())
 			continue
 		}
 
 		if im := fi2im("", inoFI); im.inode != inode {
-			glog.V(1).Warningf("jdfs [%s]:[%s] is inode [%v] instead of [%v] now.",
+			glog.V(1).Infof("jdfs [%s]:[%s] is inode [%v] instead of [%v] now.",
 				jdfsRootPath, jdfPath, im.inode, inode)
 			continue
 		} else if im.dev != jdfRootDevice {
-			glog.V(1).Warningf("jdfs [%s]:[%s] not on same local fs, not revealed to jdfc.",
+			glog.V(1).Infof("jdfs [%s]:[%s] not on same local fs, not revealed to jdfc.",
 				jdfsRootPath, jdfPath)
 			continue
 		} else {
 			inoM = im
+			ok = true
 		}
 
 		break // got inoM of same inode
 	}
 
-	if err == nil && inoM == nil {
+	if !ok {
 		err = vfs.ENOENT
-		return
 	}
-
 	return
 }
 
@@ -120,7 +120,8 @@ func readInodeDir(parentInode vfs.InodeID, reachedThrough []string) (
 		return
 	}
 
-	parentDir, err = os.OpenFile(parentM.jdfPath(), os.O_RDONLY, 0)
+	parentPath := parentM.jdfPath()
+	parentDir, err = os.OpenFile(parentPath, os.O_RDONLY, 0)
 	if err != nil {
 		return
 	}
@@ -144,13 +145,13 @@ func readInodeDir(parentInode vfs.InodeID, reachedThrough []string) (
 			// a symlink
 		} else {
 			// a file not reigned by JDFS
-			glog.V(1).Warningf("jdfs [%s]:[%s]/[%s] with file mode [%#o] not revealed to jdfc.",
+			glog.V(1).Infof("jdfs [%s]:[%s]/[%s] with file mode [%#o] not revealed to jdfc.",
 				jdfsRootPath, parentPath, childFI.Name(), childFI.Mode())
 			continue
 		}
 
 		if childM = fi2im(parentPath, childFI); childM.dev != jdfRootDevice {
-			glog.V(1).Warningf("jdfs [%s]:[%s]/[%s] not on same local fs, not revealed to jdfc.",
+			glog.V(1).Infof("jdfs [%s]:[%s]/[%s] not on same local fs, not revealed to jdfc.",
 				jdfsRootPath, parentPath, childFI.Name())
 			continue
 		}

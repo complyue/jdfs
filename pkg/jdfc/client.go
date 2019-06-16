@@ -709,6 +709,20 @@ ReleaseDirHandle(%#v)
 		panic(err)
 	}
 
+	if err = co.StartRecv(); err != nil {
+		return err
+	}
+
+	errno, err := co.RecvObj()
+	if err != nil {
+		return err
+	}
+	if en, ok := errno.(hbi.LitIntType); !ok {
+		panic(errors.Errorf("unexpected errno type [%T] of errno value [%v]", errno, errno))
+	} else if en != 0 {
+		return syscall.Errno(en)
+	}
+
 	return
 }
 
@@ -819,35 +833,152 @@ ReadFile(%#v, %#v, %#v, %#v)
 func (fs *fileSystem) WriteFile(
 	ctx context.Context,
 	op *vfs.WriteFileOp) (err error) {
-	err = vfs.ENOSYS
+	co, err := fs.po.NewCo()
+	if err != nil {
+		return err
+	}
+	defer co.Close()
+
+	if err = co.SendCode(fmt.Sprintf(`
+WriteFile(%#v, %#v, %#v, %#v)
+`, op.Inode, op.Handle, op.Offset, len(op.Data))); err != nil {
+		panic(err)
+	}
+	if err = co.SendData(op.Data); err != nil {
+		return err
+	}
+
+	if err = co.StartRecv(); err != nil {
+		return err
+	}
+
+	errno, err := co.RecvObj()
+	if err != nil {
+		return err
+	}
+	if en, ok := errno.(hbi.LitIntType); !ok {
+		panic(errors.Errorf("unexpected errno type [%T] of errno value [%v]", errno, errno))
+	} else if en != 0 {
+		return syscall.Errno(en)
+	}
+
 	return
 }
 
 func (fs *fileSystem) SyncFile(
 	ctx context.Context,
 	op *vfs.SyncFileOp) (err error) {
-	err = vfs.ENOSYS
+	co, err := fs.po.NewCo()
+	if err != nil {
+		return err
+	}
+	defer co.Close()
+
+	if err = co.SendCode(fmt.Sprintf(`
+SyncFile(%#v, %#v)
+`, op.Inode, op.Handle)); err != nil {
+		panic(err)
+	}
+
+	if err = co.StartRecv(); err != nil {
+		return err
+	}
+
+	errno, err := co.RecvObj()
+	if err != nil {
+		return err
+	}
+	if en, ok := errno.(hbi.LitIntType); !ok {
+		panic(errors.Errorf("unexpected errno type [%T] of errno value [%v]", errno, errno))
+	} else if en != 0 {
+		return syscall.Errno(en)
+	}
+
 	return
 }
 
 func (fs *fileSystem) FlushFile(
 	ctx context.Context,
 	op *vfs.FlushFileOp) (err error) {
-	err = vfs.ENOSYS
+
+	// jdfs won't buffer writes, fflush can be just nop for JDFS
+
+	// TODO better to state not implemented explicitly by returning ENOSYS ?
+	// err = vfs.ENOSYS
 	return
 }
 
 func (fs *fileSystem) ReleaseFileHandle(
 	ctx context.Context,
 	op *vfs.ReleaseFileHandleOp) (err error) {
-	err = vfs.ENOSYS
+	co, err := fs.po.NewCo()
+	if err != nil {
+		return err
+	}
+	defer co.Close()
+
+	if err = co.SendCode(fmt.Sprintf(`
+ReleaseFileHandle(%#v)
+`, op.Handle)); err != nil {
+		panic(err)
+	}
+
+	if err = co.StartRecv(); err != nil {
+		return err
+	}
+
+	errno, err := co.RecvObj()
+	if err != nil {
+		return err
+	}
+	if en, ok := errno.(hbi.LitIntType); !ok {
+		panic(errors.Errorf("unexpected errno type [%T] of errno value [%v]", errno, errno))
+	} else if en != 0 {
+		return syscall.Errno(en)
+	}
+
 	return
 }
 
 func (fs *fileSystem) ReadSymlink(
 	ctx context.Context,
 	op *vfs.ReadSymlinkOp) (err error) {
-	err = vfs.ENOSYS
+	co, err := fs.po.NewCo()
+	if err != nil {
+		return err
+	}
+	defer co.Close()
+
+	if err = co.SendCode(fmt.Sprintf(`
+ReadSymlink(%#v)
+`, op.Inode)); err != nil {
+		panic(err)
+	}
+
+	if err = co.StartRecv(); err != nil {
+		return err
+	}
+
+	errno, err := co.RecvObj()
+	if err != nil {
+		return err
+	}
+	if en, ok := errno.(hbi.LitIntType); !ok {
+		panic(errors.Errorf("unexpected errno type [%T] of errno value [%v]", errno, errno))
+	} else if en != 0 {
+		return syscall.Errno(en)
+	}
+
+	target, err := co.RecvObj()
+	if err != nil {
+		return err
+	}
+	if target, ok := target.(string); !ok {
+		panic(errors.Errorf("unexpected target type [%T] of target value [%v]", target, target))
+	} else {
+		op.Target = target
+	}
+
 	return
 }
 

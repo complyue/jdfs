@@ -34,8 +34,8 @@ func fi2im(parentPath string, fi os.FileInfo) iMeta {
 	return iMeta{
 		parentPath: parentPath, name: fi.Name(),
 
-		dev: int64(sd.Dev), inode: InodeID(sd.Ino),
-		attrs: InodeAttributes{
+		dev: int64(sd.Dev), inode: vfs.InodeID(sd.Ino),
+		attrs: vfs.InodeAttributes{
 			Nlink:  uint32(sd.Nlink),
 			Mode:   os.FileMode(sd.Mode),
 			Atime:  ts2t(sd.Atim),
