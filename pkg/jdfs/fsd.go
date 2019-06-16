@@ -234,6 +234,33 @@ func (icd *icFSD) LoadInode(incRef int, im iMeta,
 	return
 }
 
+func (icd *icFSD) InvalidateChildren(inode vfs.InodeID,
+	goneName string, comeName string) {
+	icd.mu.Lock()
+	defer icd.mu.Unlock()
+
+	isi, ok := icd.regInodes[inode]
+	if !ok {
+		panic(errors.Errorf("inode [%v] not in-core ?!", inode))
+	}
+	ici := &icd.stoInodes[isi]
+
+	// Note: should NOT modify armed children map, for safe concurrent reading of it
+
+	if len(comeName) > 0 {
+		// a new child comes in, invalidate the cache to force a reload next time needed
+		ici.children = nil
+	} else if len(goneName) > 0 {
+		// a child goes away
+		// TODO is it worth doing to make a new map with name excluded ?
+		//      the children list must be long enough for sure, but how long?
+		ici.children = nil
+	} else {
+		// is this a reasonable case ?
+		ici.children = nil
+	}
+}
+
 func (icd *icFSD) ForgetInode(inode vfs.InodeID, n int) {
 	if inode == jdfRootInode {
 		panic(errors.Errorf("forget root ?!"))
@@ -379,199 +406,6 @@ func (icd *icFSD) CreateFile(parent vfs.InodeID, name string, mode uint32) (
 				Attributes:           cici.attrs,
 				AttributesExpiration: time.Now().Add(vfs.META_ATTRS_CACHE_TIME),
 				EntryExpiration:      time.Now().Add(vfs.DIR_CHILDREN_CACHE_TIME),
-			}
-
-			return
-		}); err != nil {
-		glog.Warningf("inode lost [%v] - %+v", ici.inode, err)
-		return
-	}
-
-	return
-}
-
-func (icd *icFSD) CreateSymlink(parent vfs.InodeID, name string, target string) (ce *vfs.ChildInodeEntry, err error) {
-	icd.mu.Lock()
-	defer icd.mu.Unlock()
-
-	isi, ok := icd.regInodes[parent]
-	if !ok {
-		panic(errors.Errorf("parent inode [%v] not in-core ?!", parent))
-	}
-	ici := &icd.stoInodes[isi]
-
-	if err = ici.refreshChildren(icd, true,
-		func(parentPath string, parentDir *os.File, parentFI os.FileInfo) (keepF bool, err error) {
-			if err = os.Symlink(target, fmt.Sprintf("%s/%s", parentPath, name)); err != nil {
-				return
-			}
-			return
-		}, func(childName string, cisi int) {
-			if childName == name {
-				cici := &icd.stoInodes[cisi]
-				cici.refcnt++
-				ce = &vfs.ChildInodeEntry{
-					Child:                cici.inode,
-					Generation:           0,
-					Attributes:           cici.attrs,
-					AttributesExpiration: time.Now().Add(vfs.META_ATTRS_CACHE_TIME),
-					EntryExpiration:      time.Now().Add(vfs.DIR_CHILDREN_CACHE_TIME),
-				}
-			}
-		}); err != nil {
-		glog.Warningf("inode lost [%v] - %+v", ici.inode, err)
-		return
-	}
-
-	return
-}
-
-func (icd *icFSD) CreateLink(parent vfs.InodeID, name string, target vfs.InodeID) (ce *vfs.ChildInodeEntry, err error) {
-	icd.mu.Lock()
-	defer icd.mu.Unlock()
-
-	isi, ok := icd.regInodes[parent]
-	if !ok {
-		panic(errors.Errorf("parent inode [%v] not in-core ?!", parent))
-	}
-	ici := &icd.stoInodes[isi]
-
-	isiTarget, ok := icd.regInodes[target]
-	if !ok {
-		panic(errors.Errorf("target inode [%v] not in-core ?!", target))
-	}
-	iciTarget := &icd.stoInodes[isiTarget]
-
-	if err = iciTarget.refreshInode(icd, false,
-		func(targetPath string, targetDir *os.File, targetFI os.FileInfo) (keepF bool, err error) {
-			if err = ici.refreshChildren(icd, true,
-				func(parentPath string, parentDir *os.File, parentFI os.FileInfo) (keepF bool, err error) {
-					if err = os.Link(targetPath, fmt.Sprintf("%s/%s", parentPath, name)); err != nil {
-						return
-					}
-					return
-				}, func(childName string, cisi int) {
-					if childName == name {
-						cici := &icd.stoInodes[cisi]
-						cici.refcnt++
-						ce = &vfs.ChildInodeEntry{
-							Child:                cici.inode,
-							Generation:           0,
-							Attributes:           cici.attrs,
-							AttributesExpiration: time.Now().Add(vfs.META_ATTRS_CACHE_TIME),
-							EntryExpiration:      time.Now().Add(vfs.DIR_CHILDREN_CACHE_TIME),
-						}
-					}
-				}); err != nil {
-				glog.Warningf("inode lost [%v] - %+v", ici.inode, err)
-				return
-			}
-			return
-		}); err != nil {
-		glog.Warningf("inode lost [%v] - %+v", iciTarget.inode, err)
-		return nil, err
-	}
-
-	return
-}
-
-func (icd *icFSD) Rename(oldParent vfs.InodeID, oldName string, newParent vfs.InodeID, newName string) (err error) {
-	icd.mu.Lock()
-	defer icd.mu.Unlock()
-
-	isiOldDir, ok := icd.regInodes[oldParent]
-	if !ok {
-		panic(errors.Errorf("old parent inode [%v] not in-core ?!", oldParent))
-	}
-	iciOldDir := &icd.stoInodes[isiOldDir]
-
-	isiNewDir, ok := icd.regInodes[newParent]
-	if !ok {
-		panic(errors.Errorf("new parent inode [%v] not in-core ?!", newParent))
-	}
-	iciNewDir := &icd.stoInodes[isiNewDir]
-
-	if err = iciOldDir.refreshInode(icd, true,
-		func(oldPath string, oldDir *os.File, oldFI os.FileInfo) (keepF bool, err error) {
-			if err = iciNewDir.refreshInode(icd, true,
-				func(newPath string, newDir *os.File, newFI os.FileInfo) (keepF bool, err error) {
-
-					if err = os.Rename(
-						fmt.Sprintf("%s/%s", oldPath, oldName),
-						fmt.Sprintf("%s/%s", newPath, newName),
-					); err != nil {
-						return
-					}
-
-					return
-				}); err != nil {
-				glog.Warningf("new inode lost [%v] - %+v", iciNewDir.inode, err)
-				return
-			}
-			return
-		}); err != nil {
-		glog.Warningf("old inode lost [%v] - %+v", iciOldDir.inode, err)
-		return
-	}
-
-	return
-}
-
-func (icd *icFSD) RmDir(parent vfs.InodeID, name string) (err error) {
-	icd.mu.Lock()
-	defer icd.mu.Unlock()
-
-	isi, ok := icd.regInodes[parent]
-	if !ok {
-		panic(errors.Errorf("parent inode [%v] not in-core ?!", parent))
-	}
-	ici := &icd.stoInodes[isi]
-
-	if err = ici.refreshInode(icd, true,
-		func(parentPath string, parentDir *os.File, parentFI os.FileInfo) (keepF bool, err error) {
-
-			if err = syscall.Rmdir(fmt.Sprintf("%s/%s", parentPath, name)); err != nil {
-				return
-			}
-
-			if ici.children != nil {
-				if cInode, ok := ici.children[name]; ok {
-					delete(ici.children, name)
-					icd.forgetInode(cInode)
-				}
-			}
-
-			return
-		}); err != nil {
-		glog.Warningf("inode lost [%v] - %+v", ici.inode, err)
-		return
-	}
-
-	return
-}
-
-func (icd *icFSD) Unlink(parent vfs.InodeID, name string) (err error) {
-	icd.mu.Lock()
-	defer icd.mu.Unlock()
-
-	isi, ok := icd.regInodes[parent]
-	if !ok {
-		panic(errors.Errorf("parent inode [%v] not in-core ?!", parent))
-	}
-	ici := &icd.stoInodes[isi]
-
-	if err = ici.refreshInode(icd, true,
-		func(parentPath string, parentDir *os.File, parentFI os.FileInfo) (keepF bool, err error) {
-
-			if err = syscall.Unlink(fmt.Sprintf("%s/%s", parentPath, name)); err != nil {
-				return
-			}
-
-			if ici.children != nil {
-				if cInode, ok := ici.children[name]; ok {
-					delete(ici.children, name)
-					icd.forgetInode(cInode)
-				}
 			}
 
 			return
