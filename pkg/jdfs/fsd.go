@@ -1,7 +1,6 @@
 package jdfs
 
 import (
-	"fmt"
 	"os"
 	"sync"
 	"syscall"
@@ -344,76 +343,6 @@ func (icd *icFSD) GetInode(incRef int, inode vfs.InodeID) (ici icInode, ok bool)
 
 	icip.refcnt += incRef
 	ici, ok = *icip, true
-	return
-}
-
-func (icd *icFSD) CreateFile(parent vfs.InodeID, name string, mode uint32) (
-	ce *vfs.ChildInodeEntry, handle vfs.HandleID, err error) {
-	icd.mu.Lock()
-	defer icd.mu.Unlock()
-
-	isi, ok := icd.regInodes[parent]
-	if !ok {
-		panic(errors.Errorf("parent inode [%v] not in-core ?!", parent))
-	}
-	ici := &icd.stoInodes[isi]
-
-	if err = ici.refreshInode(icd, true,
-		func(parentPath string, parentDir *os.File, parentFI os.FileInfo) (keepF bool, err error) {
-			var (
-				childPath = fmt.Sprintf("%s/%s", parentPath, name)
-				cF        *os.File
-				cisi      int
-				cici      *icInode
-			)
-			cF, err = os.OpenFile(
-				childPath,
-				os.O_CREATE|os.O_EXCL, os.FileMode(mode),
-			)
-			if err != nil {
-				return
-			}
-			var cFI os.FileInfo
-			if cFI, err = cF.Stat(); err != nil {
-				return
-			}
-			cisi = icd.loadInode(cFI, childPath)
-			cici = &icd.stoInodes[cisi]
-			cici.refcnt++
-
-			if ici.children != nil {
-				ici.children[cFI.Name()] = cici.inode
-			}
-
-			var hsi int
-			if nFreeHdls := len(icd.freeFHIdxs); nFreeHdls > 0 {
-				hsi = icd.freeFHIdxs[nFreeHdls-1]
-				icd.freeFHIdxs = icd.freeFHIdxs[:nFreeHdls-1]
-				icd.fileHandles[hsi] = icfHandle{
-					isi: cisi, f: cF,
-				}
-			} else {
-				hsi = len(icd.fileHandles)
-				icd.fileHandles = append(icd.fileHandles, icfHandle{
-					isi: cisi, f: cF,
-				})
-			}
-			handle = vfs.HandleID(hsi)
-
-			ce = &vfs.ChildInodeEntry{
-				Child:                cici.inode,
-				Generation:           0,
-				Attributes:           cici.attrs,
-				AttributesExpiration: time.Now().Add(vfs.META_ATTRS_CACHE_TIME),
-				EntryExpiration:      time.Now().Add(vfs.DIR_CHILDREN_CACHE_TIME),
-			}
-
-			return
-		}); err != nil {
-		glog.Warningf("inode lost [%v] - %+v", ici.inode, err)
-		return
-	}
-
 	return
 }
 

@@ -470,7 +470,64 @@ func (efs *exportedFileSystem) CreateFile(parent vfs.InodeID, name string, mode 
 		panic(err)
 	}
 
-	ce, handle, fsErr := efs.icd.CreateFile(parent, name, mode)
+	var ce vfs.ChildInodeEntry
+	var handle vfs.HandleID
+	fsErr := func() error {
+		ici, ok := efs.icd.GetInode(parent)
+		if !ok {
+			return vfs.ENOENT
+		}
+		parentM, outdatedPaths, err := statInode(ici.inode, ici.reachedThrough)
+		if err != nil {
+			return err
+		}
+		if ici, ok = efs.icd.LoadInode(0, parentM, outdatedPaths, nil, time.Now()); !ok {
+			return err
+		}
+
+		// perform requested FUSE op on local fs
+		childPath := parentM.jdfChildPath(name)
+		cF, err = os.OpenFile(childPath,
+			os.O_CREATE|os.O_EXCL, os.FileMode(mode),
+		)
+		if err != nil {
+			return err
+		}
+		if cFI, err := os.Lstat(childPath); err != nil {
+			return err
+		}
+		checkTime = time.Now()
+		if cici, ok := efs.icd.LoadInode(1, fi2im("", cFI), nil, nil, checkTime); !ok {
+			return vfs.ENOENT
+		} else {
+			efs.icd.InvalidateChildren(ici.inode, "", name)
+
+			var hsi int
+			if nFreeHdls := len(efs.icd.freeFHIdxs); nFreeHdls > 0 {
+				hsi = efs.icd.freeFHIdxs[nFreeHdls-1]
+				efs.icd.freeFHIdxs = efs.icd.freeFHIdxs[:nFreeHdls-1]
+				efs.icd.fileHandles[hsi] = icfHandle{
+					isi: cisi, f: cF,
+				}
+			} else {
+				hsi = len(efs.icd.fileHandles)
+				efs.icd.fileHandles = append(efs.icd.fileHandles, icfHandle{
+					isi: cisi, f: cF,
+				})
+			}
+			handle = vfs.HandleID(hsi)
+
+			ce = vfs.ChildInodeEntry{
+				Child:                cici.inode,
+				Generation:           0,
+				Attributes:           cici.attrs,
+				AttributesExpiration: checkTime.Add(vfs.META_ATTRS_CACHE_TIME),
+				EntryExpiration:      checkTime.Add(vfs.DIR_CHILDREN_CACHE_TIME),
+			}
+			return nil
+		}
+		return vfs.ENOENT
+	}()
 
 	if err := co.StartSend(); err != nil {
 		panic(err)
@@ -478,13 +535,6 @@ func (efs *exportedFileSystem) CreateFile(parent vfs.InodeID, name string, mode 
 
 	switch fse := fsErr.(type) {
 	case nil:
-		if ce == nil {
-			// TODO elaborate error description and handling by jdfc in this case
-			if err := co.SendObj(hbi.Repr(int(vfs.EEXIST))); err != nil {
-				panic(err)
-			}
-			return
-		}
 		if err := co.SendObj(`0`); err != nil {
 			panic(err)
 		}
@@ -501,7 +551,7 @@ func (efs *exportedFileSystem) CreateFile(parent vfs.InodeID, name string, mode 
 		panic(err)
 	}
 
-	bufView := ((*[unsafe.Sizeof(*ce)]byte)(unsafe.Pointer(ce)))[0:unsafe.Sizeof(*ce)]
+	bufView := ((*[unsafe.Sizeof(ce)]byte)(unsafe.Pointer(&ce)))[0:unsafe.Sizeof(ce)]
 	if err := co.SendData(bufView); err != nil {
 		panic(err)
 	}
