@@ -1014,5 +1014,7 @@ func (fs *fileSystem) SetXattr(
 }
 
 func (fs *fileSystem) Destroy() {
-	fs.po.Close()
+	if fs.po != nil {
+		fs.po.Close()
+	}
 }

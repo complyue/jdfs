@@ -204,6 +204,7 @@ func (icd *icFSD) loadInode(incRef int, im iMeta,
 		lastChildrenChecked: checkTime,
 		children:            children,
 	}
+	icd.regInodes[im.inode] = isi
 
 	return
 }

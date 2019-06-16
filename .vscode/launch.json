@@ -16,7 +16,7 @@
             "program": "${workspaceFolder}/cmd/jdfs",
             "env": {},
             "args": [
-                "-v=3",
+                "-v=2",
                 "-solo",
                 "/tmp/jdf"
             ]
@@ -29,7 +29,7 @@
             "program": "${workspaceFolder}/cmd/jdfc",
             "env": {},
             "args": [
-                "-v=3",
+                "-v=2",
                 "jdfs://localhost/",
                 "/mnt/jdf/"
             ]
