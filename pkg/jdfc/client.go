@@ -4,7 +4,6 @@ package jdfc
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"sync"
 	"syscall"
@@ -797,20 +796,22 @@ ReadFile(%#v, %#v, %#v, %#v)
 	} else {
 		op.BytesRead = int(bytesRead)
 	}
+
+	eof, err := co.RecvObj()
+	if err != nil {
+		return err
+	}
+
 	if op.BytesRead > 0 {
 		if err = co.RecvData(op.Dst[:op.BytesRead]); err != nil {
 			return err
 		}
 	}
 
-	eof, err := co.RecvObj()
-	if err != nil {
-		return err
-	}
-	if eof, ok := eof.(bool); !ok {
-		panic(errors.Errorf("unexpected eof type [%T] of eof value [%v]", eof, eof))
-	} else if eof {
-		err = io.EOF
+	if eof.(bool) {
+		// return EOF only in directio mode
+		// TODO figure out whether we'd support directio.
+		// return io.EOF
 	}
 
 	return
