@@ -115,6 +115,9 @@ func (icd *icFSD) init(readOnly bool) error {
 	icd.fileHandles = []icfHandle{icfHandle{}} // reserve 0 for nil handle
 	icd.freeFHIdxs = nil
 
+	// fake mounted JDFS root inode to be constant 1
+	rootM.inode = vfs.RootInodeID
+
 	isi := icd.loadInode(1, rootM, nil, nil, time.Now())
 	if isi != 0 {
 		panic("root inode got isi other than zero ?!?")

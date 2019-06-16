@@ -121,10 +121,6 @@ func (efs *exportedFileSystem) LookUpInode(parent vfs.InodeID, name string) {
 		panic(err)
 	}
 
-	if parent == vfs.RootInodeID { // translate FUSE root to actual root inode
-		parent = jdfRootInode
-	}
-
 	var ce vfs.ChildInodeEntry
 	fsErr := func() error {
 		ici, ok := efs.icd.GetInode(0, parent)
@@ -235,10 +231,6 @@ func (efs *exportedFileSystem) GetInodeAttributes(inode vfs.InodeID) {
 		panic(err)
 	}
 
-	if inode == vfs.RootInodeID { // translate FUSE root to actual root inode
-		inode = jdfRootInode
-	}
-
 	var attrs vfs.InodeAttributes
 
 	var fsErr error
@@ -294,10 +286,6 @@ func (efs *exportedFileSystem) SetInodeAttributes(inode vfs.InodeID,
 
 	if err := co.FinishRecv(); err != nil {
 		panic(err)
-	}
-
-	if inode == vfs.RootInodeID { // translate FUSE root to actual root inode
-		inode = jdfRootInode
 	}
 
 	var attrs vfs.InodeAttributes

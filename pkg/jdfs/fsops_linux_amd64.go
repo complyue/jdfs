@@ -31,19 +31,20 @@ func fi2im(parentPath string, fi os.FileInfo) iMeta {
 	if !ok {
 		panic(errors.Errorf("Incompatible local file: [%s]", fi.Name))
 	}
+
 	return iMeta{
 		parentPath: parentPath, name: fi.Name(),
 
 		dev: int64(sd.Dev), inode: vfs.InodeID(sd.Ino),
 		attrs: vfs.InodeAttributes{
+			Size:   uint64(fi.Size()),
 			Nlink:  uint32(sd.Nlink),
-			Mode:   os.FileMode(sd.Mode),
+			Mode:   fi.Mode(),
 			Atime:  ts2t(sd.Atim),
 			Mtime:  ts2t(sd.Mtim),
 			Ctime:  ts2t(sd.Ctim),
 			Crtime: ts2t(sd.Ctim),
-
-			Uid: sd.Uid, Gid: sd.Gid,
+			Uid:    sd.Uid, Gid: sd.Gid,
 		},
 	}
 }

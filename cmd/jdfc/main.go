@@ -190,7 +190,7 @@ Simple usage:
 		Options: mntOpts,
 	}
 
-	if glog.V(3) {
+	if glog.V(2) {
 		cfg.DebugLogger = log.New(os.Stderr, "jdfc: ", 0)
 	}
 

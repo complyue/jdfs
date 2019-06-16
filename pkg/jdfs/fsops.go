@@ -85,9 +85,16 @@ func statInode(inode vfs.InodeID, reachedThrough []string) (
 		}
 
 		if im := fi2im("", inoFI); im.inode != inode {
-			glog.V(1).Infof("jdfs [%s]:[%s] is inode [%v] instead of [%v] now.",
-				jdfsRootPath, jdfPath, im.inode, inode)
-			continue
+			if inode == vfs.RootInodeID && im.inode == jdfRootInode {
+				// fake mounted JDFS root inode to be constant 1
+				im.inode = vfs.RootInodeID
+				inoM = im
+				ok = true
+			} else {
+				glog.V(1).Infof("jdfs [%s]:[%s] is inode [%v] instead of [%v] now.",
+					jdfsRootPath, jdfPath, im.inode, inode)
+				continue
+			}
 		} else if im.dev != jdfRootDevice {
 			glog.V(1).Infof("jdfs [%s]:[%s] not on same local fs, not revealed to jdfc.",
 				jdfsRootPath, jdfPath)
