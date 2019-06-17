@@ -492,6 +492,11 @@ func (icd *icFSD) ReleaseFileHandle(handle int) {
 		panic(errors.New("releasing non-existing file handle ?!"))
 	}
 
+	if err := icfh.f.Close(); err != nil {
+		glog.Errorf("Error on closing jdfs file [%s]/[%s] - %+v",
+			jdfsRootPath, icfh.f.Name(), err)
+	}
+
 	// fill fields with invalid values
 	*icfh = icfHandle{}
 
