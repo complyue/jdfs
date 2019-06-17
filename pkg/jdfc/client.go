@@ -54,6 +54,8 @@ func MountJDFS(
 	fs := &fileSystem{
 		readOnly: cfg.ReadOnly,
 		jdfPath:  jdfPath,
+
+		jdfcUID: uint32(os.Geteuid()), jdfcGID: uint32(os.Getegid()),
 	}
 
 	// prepare the hosting environment to be reacting to jdfs
@@ -107,20 +109,29 @@ type fileSystem struct {
 	readOnly bool
 	jdfPath  string
 
+	jdfcUID, jdfcGID uint32
+
 	mu sync.Mutex
 
 	po *hbi.PostingEnd
 	ho *hbi.HostingEnd
 
-	jdfsRootIno vfs.InodeID
-	jdfsUID     int64
-	jdfsGID     int64
+	jdfsUID, jdfsGID uint32
 }
 
 func (fs *fileSystem) NamesToExpose() []string {
 	return []string{
 		"InvalidateFileContent",
 		"InvalidateDirEntry",
+	}
+}
+
+func (fs *fileSystem) mapOwner(attrs *vfs.InodeAttributes) {
+	if attrs.Uid == fs.jdfsUID {
+		attrs.Uid = fs.jdfcUID
+	}
+	if attrs.Gid == fs.jdfsGID {
+		attrs.Gid = fs.jdfcGID
 	}
 }
 
@@ -160,9 +171,8 @@ Mount(%#v, %#v)
 			return err
 		}
 		mountedFields := mountResult.(hbi.LitListType)
-		fs.jdfsRootIno = vfs.InodeID(mountedFields[0].(hbi.LitIntType))
-		fs.jdfsUID = mountedFields[1].(hbi.LitIntType)
-		fs.jdfsGID = mountedFields[2].(hbi.LitIntType)
+		fs.jdfsUID = uint32(mountedFields[1].(hbi.LitIntType))
+		fs.jdfsGID = uint32(mountedFields[2].(hbi.LitIntType))
 
 		return
 	}(); err != nil {
@@ -235,6 +245,9 @@ LookUpInode(%#v, %#v)
 	if err = co.RecvData(bufView); err != nil {
 		return err
 	}
+
+	fs.mapOwner(&op.Entry.Attributes)
+
 	return
 }
 
@@ -267,6 +280,9 @@ GetInodeAttributes(%#v)
 	if err = co.RecvData(bufView); err != nil {
 		return err
 	}
+
+	fs.mapOwner(&op.Attributes)
+
 	return
 }
 
@@ -318,6 +334,8 @@ SetInodeAttributes(%#v,%#v, %#v, %#v,%#v, %#v, %#v)
 	if err = co.RecvData(bufView); err != nil {
 		return err
 	}
+
+	fs.mapOwner(&op.Attributes)
 
 	return
 }
@@ -428,6 +446,8 @@ CreateFile(%#v, %#v, %#v)
 		return err
 	}
 
+	fs.mapOwner(&op.Entry.Attributes)
+
 	return
 }
 
@@ -465,6 +485,8 @@ CreateSymlink(%#v, %#v, %#v)
 		return err
 	}
 
+	fs.mapOwner(&op.Entry.Attributes)
+
 	return
 }
 
@@ -501,6 +523,8 @@ CreateLink(%#v, %#v, %#v)
 	if err = co.RecvData(bufView); err != nil {
 		return err
 	}
+
+	fs.mapOwner(&op.Entry.Attributes)
 
 	return
 }
