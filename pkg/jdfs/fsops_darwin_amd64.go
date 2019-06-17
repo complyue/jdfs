@@ -34,9 +34,9 @@ func fi2im(jdfPath string, fi os.FileInfo) iMeta {
 	return iMeta{
 		jdfPath: jdfPath, name: fi.Name(),
 
-		dev: int64(sd.Dev), inode: InodeID(sd.Ino),
+		dev: int64(sd.Dev), inode: vfs.InodeID(sd.Ino),
 		attrs: vfs.InodeAttributes{
-			Size:   fi.Size(),
+			Size:   uint64(fi.Size()),
 			Nlink:  uint32(sd.Nlink),
 			Mode:   fi.Mode(),
 			Atime:  ts2t(sd.Atimespec),
