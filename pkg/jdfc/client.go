@@ -98,6 +98,9 @@ func MountJDFS(
 		return
 	}
 
+	fmt.Fprintf(os.Stderr, "JDFS client mounted [%s] on [%s]\n",
+		cfg.FSName, mountpoint)
+
 	if err = mfs.Join(context.Background()); err != nil {
 		return err
 	}
