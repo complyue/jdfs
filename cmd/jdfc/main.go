@@ -90,7 +90,7 @@ Simple usage:
 	defer df.Close()
 
 	jdfsHostName, jdfsPort := "", ""
-	jdfPath := "/"
+	jdfsPath := ""
 	if len(urlArg) > 0 {
 		// jdfs url specified on cmdl
 		jdfsURL, err = url.Parse(urlArg)
@@ -103,9 +103,9 @@ Simple usage:
 		jdfsHostName = jdfsURL.Hostname()
 		jdfsPort = jdfsURL.Port()
 		if len(jdfsURL.Path) <= 0 {
-			jdfPath = "/"
+			jdfsPath = ""
 		} else {
-			jdfPath = jdfsURL.Path
+			jdfsPath = jdfsURL.Path
 		}
 	} else {
 		// jdfs url not specified, find a magic file for root url
@@ -136,14 +136,14 @@ Simple usage:
 					} else {
 						glog.V(1).Infof("Using relative path [%s] appended to root jdfs url [%s] configured in [%s]", mpRel, magicRoot, magicFn)
 						if len(jdfsRootURL.Path) <= 0 {
-							jdfPath = "/" + mpRel
+							jdfsPath = mpRel
 						} else {
-							jdfPath = filepath.Join(jdfsRootURL.Path, mpRel)
+							jdfsPath = filepath.Join(jdfsRootURL.Path, mpRel)
 						}
 
 						// inherite query/fragment from configured root url
 						derivedURL := *jdfsRootURL
-						derivedURL.Path = jdfPath
+						derivedURL.Path = jdfsPath
 						jdfsURL = &derivedURL
 					}
 					break
@@ -167,13 +167,13 @@ Simple usage:
 		jdfsPort = "1112"
 	}
 	jdfHost := jdfsHostName + ":" + jdfsPort
-	fsName := fmt.Sprintf("jdfs://%s%s", jdfHost, jdfPath)
+	fsName := fmt.Sprintf("jdfs://%s/%s", jdfHost, jdfsPath)
 
 	if jdfsURL == nil {
 		jdfsURL = &url.URL{
 			Scheme: "jdfs",
 			Host:   jdfHost,
-			Path:   jdfPath,
+			Path:   jdfsPath,
 		}
 	}
 
@@ -208,7 +208,7 @@ Simple usage:
 		cfg.DebugLogger = log.New(os.Stderr, "jdfc: ", 0)
 	}
 
-	if err = jdfc.MountJDFS(jdfc.ConnTCP(jdfHost), jdfPath, mpFullPath, cfg); err != nil {
+	if err = jdfc.MountJDFS(jdfc.ConnTCP(jdfHost), jdfsPath, mpFullPath, cfg); err != nil {
 		log.Fatal(err)
 	}
 }

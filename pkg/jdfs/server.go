@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"syscall"
 	"time"
 	"unsafe"
@@ -63,17 +64,18 @@ func (efs *exportedFileSystem) NamesToExpose() []string {
 	}
 }
 
-func (efs *exportedFileSystem) Mount(readOnly bool, jdfPath string) {
+func (efs *exportedFileSystem) Mount(readOnly bool, jdfsPath string) {
 	efs.jdfsUID = os.Geteuid()
 	efs.jdfsGID = os.Getegid()
 
 	efs.readOnly = readOnly
 
 	var rootPath string
-	if jdfPath == "/" || jdfPath == "" {
+	if jdfsPath == "/" || jdfsPath == "" {
 		rootPath = efs.exportRoot
+
 	} else {
-		rootPath = efs.exportRoot + jdfPath
+		rootPath = filepath.Join(efs.exportRoot, jdfsPath)
 	}
 
 	jdfsRootPath = rootPath

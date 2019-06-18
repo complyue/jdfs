@@ -27,7 +27,7 @@ func MountJDFS(
 	jdfsConnector func(he *hbi.HostingEnv) (
 		po *hbi.PostingEnd, ho *hbi.HostingEnd, err error,
 	),
-	jdfPath string,
+	jdfsPath string,
 	mountpoint string,
 	cfg *fuse.MountConfig,
 ) (err error) {
@@ -53,7 +53,7 @@ func MountJDFS(
 
 	fs := &fileSystem{
 		readOnly: cfg.ReadOnly,
-		jdfPath:  jdfPath,
+		jdfsPath: jdfsPath,
 
 		jdfcUID: uint32(os.Geteuid()), jdfcGID: uint32(os.Getegid()),
 	}
@@ -110,7 +110,7 @@ func MountJDFS(
 
 type fileSystem struct {
 	readOnly bool
-	jdfPath  string
+	jdfsPath string
 
 	jdfcUID, jdfcGID uint32
 
@@ -163,7 +163,7 @@ func (fs *fileSystem) connReset(
 		defer co.Close()
 		if err = co.SendCode(fmt.Sprintf(`
 Mount(%#v, %#v)
-`, fs.readOnly, fs.jdfPath)); err != nil {
+`, fs.readOnly, fs.jdfsPath)); err != nil {
 			return
 		}
 		if err = co.StartRecv(); err != nil {
