@@ -39,7 +39,7 @@ const (
 	//
 	// More reading:
 	//     http://stackoverflow.com/q/21540315/1505451
-	META_ATTRS_CACHE_TIME = 500 * time.Millisecond
+	META_ATTRS_CACHE_TIME = 2 * time.Hour
 
 	// The time until which the kernel may maintain an entry for this name to
 	// inode mapping in its dentry cache. After this time, it will revalidate the
@@ -63,5 +63,5 @@ const (
 	//
 	// Beware: this value is ignored on OS X, where entry caching is disabled by
 	// default. See notes on MountConfig.EnableVnodeCaching for more.
-	DIR_CHILDREN_CACHE_TIME = 1000 * time.Millisecond
+	DIR_CHILDREN_CACHE_TIME = 2 * time.Hour
 )
