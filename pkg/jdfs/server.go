@@ -153,6 +153,11 @@ func (efs *exportedFileSystem) LookUpInode(parent vfs.InodeID, name string) {
 							Attributes: cici.attrs,
 						}
 						found = true
+
+						if glog.V(2) {
+							glog.Infof("Resolved path [%s]:[%s]/[%s] to inode %d",
+								jdfsRootPath, parentM.jdfPath, name, cici.inode)
+						}
 					}
 				}
 			}
@@ -317,18 +322,30 @@ func (efs *exportedFileSystem) SetInodeAttributes(inode vfs.InodeID,
 			defer inoF.Close()
 
 			if chgSize {
+				if glog.V(2) {
+					glog.Infof("Setting file [%s]:[%s] size to %d bytes", jdfsRootPath, jdfPath, sz)
+				}
+
 				if err := inoF.Truncate(int64(sz)); err != nil {
 					return err
 				}
 			}
 
 			if chgMode {
+				if glog.V(2) {
+					glog.Infof("Setting file [%s]:[%s] mode to [%+v]", jdfsRootPath, jdfPath, os.FileMode(mode))
+				}
+
 				if err := inoF.Chmod(os.FileMode(mode)); err != nil {
 					return err
 				}
 			}
 
 			if chgMtime {
+				if glog.V(2) {
+					glog.Infof("Setting file [%s]:[%s] mtime to %v", jdfsRootPath, jdfPath, time.Unix(0, mNsec))
+				}
+
 				if err := chftimes(inoF, jdfPath, mNsec); err != nil {
 					return err
 				}
@@ -518,11 +535,6 @@ func (efs *exportedFileSystem) CreateFile(parent vfs.InodeID, name string, mode 
 		}
 		checkTime := time.Now()
 		childM := fi2im(childPath, cFI)
-		if glog.V(2) {
-			glog.Infof("Created file [%s]:[%s]/[%s] with mode [%+v] => [%+v]",
-				jdfsRootPath, parentM.jdfPath, name,
-				os.FileMode(mode), cFI.Mode())
-		}
 		cici, ok := efs.icd.LoadInode(1, childM, nil, nil, checkTime)
 		if !ok {
 			err = vfs.ENOENT
@@ -539,6 +551,13 @@ func (efs *exportedFileSystem) CreateFile(parent vfs.InodeID, name string, mode 
 		if handle, err = efs.icd.CreateFileHandle(cici.inode, cF); err != nil {
 			return
 		}
+
+		if glog.V(2) {
+			glog.Infof("Created file [%s]:[%s]/[%s] with mode [%+v] => [%+v], as handle %d",
+				jdfsRootPath, parentM.jdfPath, name,
+				os.FileMode(mode), cFI.Mode(), handle)
+		}
+
 		return
 	}()
 
@@ -603,11 +622,13 @@ func (efs *exportedFileSystem) CreateSymlink(parent vfs.InodeID, name string, ta
 		}
 		checkTime := time.Now()
 		childM := fi2im(childPath, cFI)
+
 		if glog.V(2) {
 			glog.Infof("Created symlink [%s]:[%s]/[%s] -> [%s] with mode [%+v]",
 				jdfsRootPath, parentM.jdfPath, name,
 				target, cFI.Mode())
 		}
+
 		if cici, ok := efs.icd.LoadInode(1, childM, nil, nil, checkTime); !ok {
 			return vfs.ENOENT
 		} else {
@@ -688,11 +709,13 @@ func (efs *exportedFileSystem) CreateLink(parent vfs.InodeID, name string, targe
 		}
 		checkTime := time.Now()
 		childM := fi2im(childPath, cFI)
+
 		if glog.V(2) {
 			glog.Infof("Created Link [%s]:[%s]/[%s] with mode [%+v]",
 				jdfsRootPath, parentM.jdfPath, name,
 				cFI.Mode())
 		}
+
 		if cici, ok := efs.icd.LoadInode(1, childM, nil, nil, checkTime); !ok {
 			return vfs.ENOENT
 		} else {
@@ -769,6 +792,12 @@ func (efs *exportedFileSystem) Rename(oldParent vfs.InodeID, oldName string, new
 		if err = os.Rename(oldPath, newPath); err != nil {
 			return err
 		}
+
+		if glog.V(2) {
+			glog.Infof("Renamed [%s]: [%s]/[%s] to [%s]/[%s]", jdfsRootPath,
+				oldParentM.jdfPath, oldName, newParentM.jdfPath, newName)
+		}
+
 		if iciOldParent.inode == iciNewParent.inode {
 			efs.icd.InvalidateChildren(iciNewParent.inode, oldName, newName)
 		} else {
@@ -926,6 +955,11 @@ func (efs *exportedFileSystem) OpenDir(inode vfs.InodeID) {
 		}
 		checkTime := time.Now()
 
+		if glog.V(2) {
+			glog.Infof("Loaded %d entries for [%s]:[%s]", len(childMs), jdfsRootPath,
+				parentM.jdfPath)
+		}
+
 		var children map[string]vfs.InodeID
 		var entries []vfs.DirEnt
 		if len(childMs) > 0 {
@@ -1007,12 +1041,18 @@ func (efs *exportedFileSystem) ReadDir(inode vfs.InodeID, handle int, offset int
 		buf = efs.bufPool.Get(bufSz)
 		defer efs.bufPool.Return(buf)
 
-		for i := offset; i < len(icdh.entries); i++ {
+		i := offset
+		for ; i < len(icdh.entries); i++ {
 			n := vfs.WriteDirEnt(buf[bytesRead:], icdh.entries[i])
 			if n <= 0 {
 				break
 			}
 			bytesRead += n
+		}
+
+		if glog.V(2) {
+			glog.Infof("Prepared %d (%d~%d) of %d entries for dir [%s]:[%s]", i-offset,
+				offset, i, len(icdh.entries), jdfsRootPath, icdh.jdfPath)
 		}
 	}
 
@@ -1051,7 +1091,11 @@ func (efs *exportedFileSystem) ReleaseDirHandle(handle int) {
 		panic(err)
 	}
 
-	efs.icd.ReleaseDirHandle(handle)
+	released := efs.icd.ReleaseDirHandle(handle)
+
+	if glog.V(2) {
+		glog.Infof("Released dir handle for [%s]:[%s]", jdfsRootPath, released.jdfPath)
+	}
 }
 
 func (efs *exportedFileSystem) OpenFile(inode vfs.InodeID, flags uint32) {
@@ -1094,6 +1138,12 @@ func (efs *exportedFileSystem) OpenFile(inode vfs.InodeID, flags uint32) {
 		if handle, err = efs.icd.CreateFileHandle(ici.inode, oF); err != nil {
 			return
 		}
+
+		if glog.V(2) {
+			glog.Infof("Opened file [%s]:[%s] with flags=%x, as handle %d",
+				jdfsRootPath, jdfPath, flags, handle)
+		}
+
 		return
 	}()
 
@@ -1147,6 +1197,11 @@ func (efs *exportedFileSystem) ReadFile(inode vfs.InodeID, handle int, offset in
 			defer efs.bufPool.Return(buf)
 
 			bytesRead, fsErr = icfh.f.ReadAt(buf, offset)
+
+			if glog.V(2) {
+				glog.Infof("Read %d bytes @%d from file [%s]:[%s]", bytesRead, offset,
+					jdfsRootPath, icfh.f.Name())
+			}
 		}()
 	}
 
@@ -1214,7 +1269,13 @@ func (efs *exportedFileSystem) WriteFile(inode vfs.InodeID, handle int, offset i
 				panic(err)
 			}
 
-			_, fsErr = icfh.f.WriteAt(buf, offset)
+			bytesWritten := 0
+			bytesWritten, fsErr = icfh.f.WriteAt(buf, offset)
+
+			if glog.V(2) {
+				glog.Infof("Written %d bytes @%d to file [%s]:[%s]", bytesWritten, offset,
+					jdfsRootPath, icfh.f.Name())
+			}
 		}()
 	}
 
@@ -1259,6 +1320,10 @@ func (efs *exportedFileSystem) SyncFile(inode vfs.InodeID, handle int) {
 			}
 
 			fsErr = icfh.f.Sync()
+
+			if glog.V(2) {
+				glog.Infof("Sync'ed file [%s]:[%s]", jdfsRootPath, icfh.f.Name())
+			}
 		}()
 	}
 
@@ -1297,6 +1362,10 @@ func (efs *exportedFileSystem) ReleaseFileHandle(handle int) {
 			glog.Errorf("Error on closing jdfs file [%s]:[%s] - %+v",
 				jdfsRootPath, icfh.f.Name(), err)
 		}
+
+		if glog.V(2) {
+			glog.Infof("File handle %d closed for file [%s]:[%s]", handle, jdfsRootPath, icfh.f.Name())
+		}
 	} else {
 		panic(fsErr)
 	}
@@ -1330,6 +1399,10 @@ func (efs *exportedFileSystem) ReadSymlink(inode vfs.InodeID) {
 		jdfPath := inoM.jdfPath
 		if target, err = os.Readlink(jdfPath); err != nil {
 			return
+		}
+
+		if glog.V(2) {
+			glog.Infof("Resolved symlink [%s]: [%s] to [%s]", jdfsRootPath, jdfPath, target)
 		}
 
 		return
