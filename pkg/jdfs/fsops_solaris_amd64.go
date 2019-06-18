@@ -44,7 +44,7 @@ func chftimes(f *os.File, jdfPath string, nsec int64) error {
 	t := syscall.Timespec{
 		Sec: nsec / 1e9, Nsec: nsec % 1e9,
 	}
-	return syscall.UtimesNano(UtimesNano, []syscall.Timespec{
+	return syscall.UtimesNano(jdfPath, []syscall.Timespec{
 		t, t,
 	})
 }
