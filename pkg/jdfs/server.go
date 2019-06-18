@@ -327,7 +327,7 @@ func (efs *exportedFileSystem) SetInodeAttributes(inode vfs.InodeID,
 
 			if chgSize {
 				if glog.V(2) {
-					glog.Infof("Setting file [%s]:[%s] size to %d bytes", jdfsRootPath, jdfPath, sz)
+					glog.Infof("Setting size of file [%s]:[%s] to %d bytes", jdfsRootPath, jdfPath, sz)
 				}
 
 				if err := inoF.Truncate(int64(sz)); err != nil {
@@ -337,7 +337,7 @@ func (efs *exportedFileSystem) SetInodeAttributes(inode vfs.InodeID,
 
 			if chgMode {
 				if glog.V(2) {
-					glog.Infof("Setting file [%s]:[%s] mode to [%+v]", jdfsRootPath, jdfPath, os.FileMode(mode))
+					glog.Infof("Setting mode of file [%s]:[%s] to [%+v]", jdfsRootPath, jdfPath, os.FileMode(mode))
 				}
 
 				if err := inoF.Chmod(os.FileMode(mode)); err != nil {
@@ -347,7 +347,7 @@ func (efs *exportedFileSystem) SetInodeAttributes(inode vfs.InodeID,
 
 			if chgMtime {
 				if glog.V(2) {
-					glog.Infof("Setting file [%s]:[%s] mtime to %v", jdfsRootPath, jdfPath, time.Unix(0, mNsec))
+					glog.Infof("Setting mtim of file [%s]:[%s] to %v", jdfsRootPath, jdfPath, time.Unix(0, mNsec))
 				}
 
 				if err := chftimes(inoF, jdfPath, mNsec); err != nil {
