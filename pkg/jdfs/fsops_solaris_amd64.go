@@ -4,16 +4,25 @@ import (
 	"os"
 	"syscall"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/complyue/jdfs/pkg/errors"
 	"github.com/complyue/jdfs/pkg/vfs"
 )
 
 func statFS(rootDir *os.File) (op vfs.StatFSOp, err error) {
+	var fsStat unix.Statvfs_t
+	if err = unix.Fstatvfs(int(rootDir.Fd()), &fsStat); err != nil {
+		return
+	}
 
-	// TODO syscall.Fstatfs is missing as of Go1.12.5,
-	//      figure out how to support this,
-	//      maybe solaris support statfs through CRT lib calls,
-	//      maybe cgo is needed.
+	op.BlockSize = uint32(fsStat.Frsize)
+	op.Blocks = fsStat.Blocks
+	op.BlocksFree = fsStat.Bfree
+	op.BlocksAvailable = fsStat.Bavail
+	op.IoSize = uint32(4096)
+	op.Inodes = fsStat.Files
+	op.InodesFree = fsStat.Ffree
 
 	return
 }
