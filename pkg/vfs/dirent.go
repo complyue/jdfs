@@ -15,21 +15,35 @@
 package vfs
 
 import (
-	"syscall"
 	"unsafe"
 )
 
 type DirEntType uint32
 
 const (
-	DT_Unknown   DirEntType = 0
-	DT_Socket    DirEntType = syscall.DT_SOCK
-	DT_Link      DirEntType = syscall.DT_LNK
-	DT_File      DirEntType = syscall.DT_REG
-	DT_Block     DirEntType = syscall.DT_BLK
-	DT_Directory DirEntType = syscall.DT_DIR
-	DT_Char      DirEntType = syscall.DT_CHR
-	DT_FIFO      DirEntType = syscall.DT_FIFO
+	// syscall doesn't have these @solaris, copied from @darwin/@linux
+
+	DT_BLK     = 0x6
+	DT_CHR     = 0x2
+	DT_DIR     = 0x4
+	DT_FIFO    = 0x1
+	DT_LNK     = 0xa
+	DT_REG     = 0x8
+	DT_SOCK    = 0xc
+	DT_UNKNOWN = 0x0
+	DT_WHT     = 0xe
+)
+
+const (
+	DT_Unknown DirEntType = DT_UNKNOWN
+
+	DT_Socket    DirEntType = DT_SOCK
+	DT_Link      DirEntType = DT_LNK
+	DT_File      DirEntType = DT_REG
+	DT_Block     DirEntType = DT_BLK
+	DT_Directory DirEntType = DT_DIR
+	DT_Char      DirEntType = DT_CHR
+	DT_Fifo      DirEntType = DT_FIFO
 )
 
 // A struct representing an entry within a directory file, describing a child.

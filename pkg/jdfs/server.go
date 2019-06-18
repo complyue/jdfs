@@ -12,6 +12,7 @@ import (
 	"github.com/complyue/hbi"
 	"github.com/complyue/jdfs/pkg/errors"
 	"github.com/complyue/jdfs/pkg/vfs"
+	"github.com/golang/glog"
 )
 
 type exportedFileSystem struct {
@@ -896,6 +897,10 @@ func (efs *exportedFileSystem) OpenDir(inode vfs.InodeID) {
 			} else if cMode&os.ModeSymlink != 0 {
 				entType = vfs.DT_Link
 			} else {
+				if glog.V(1) {
+					glog.Infof("jdfs [%s]:[%s]/[%s] has mode [%v], not revealed to jdfc.",
+						jdfsRootPath, parentM.jdfPath, childM.name, cMode)
+				}
 				continue // hide this strange inode to jdfc
 			}
 			entries = append(entries, vfs.DirEnt{
