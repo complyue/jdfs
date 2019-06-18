@@ -148,9 +148,17 @@ func readInodeDir(parentInode vfs.InodeID, reachedThrough []string) (
 			continue
 		}
 
-		if childM = fi2im(parentM.childPath(childFI.Name()), childFI); childM.dev != jdfRootDevice {
-			glog.V(1).Infof("jdfs [%s]:[%s]/[%s] not on same local fs, not revealed to jdfc.",
+		childM = fi2im(parentM.childPath(childFI.Name()), childFI)
+		if glog.V(2) {
+			glog.Infof("Inode [%v]:[%v] is [%s]:[%s]/[%s]", childM.dev, childM.inode,
 				jdfsRootPath, parentPath, childFI.Name())
+		}
+
+		if childM.dev != jdfRootDevice {
+			if glog.V(1) {
+				glog.Infof("jdfs [%s]:[%s]/[%s] not on same local fs, not revealed to jdfc.",
+					jdfsRootPath, parentPath, childFI.Name())
+			}
 			continue
 		}
 
