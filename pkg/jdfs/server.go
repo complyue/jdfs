@@ -323,7 +323,7 @@ func (efs *exportedFileSystem) SetInodeAttributes(inode vfs.InodeID,
 			}
 
 			if chgMtime {
-				if err := chftimes(inoF, mNsec); err != nil {
+				if err := chftimes(inoF, jdfPath, mNsec); err != nil {
 					return err
 				}
 			}

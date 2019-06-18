@@ -27,7 +27,7 @@ func fi2im(jdfPath string, fi os.FileInfo) iMeta {
 		jdfPath: jdfPath, name: fi.Name(),
 
 		dev: int64(sd.Dev), inode: vfs.InodeID(sd.Ino),
-		attrs: InodeAttributes{
+		attrs: vfs.InodeAttributes{
 			Size:   uint64(fi.Size()),
 			Nlink:  uint32(sd.Nlink),
 			Mode:   fi.Mode(),
@@ -40,9 +40,11 @@ func fi2im(jdfPath string, fi os.FileInfo) iMeta {
 	}
 }
 
-func chftimes(f *os.File, nsec int64) error {
-	t := syscall.NsecToTimeval(nsec)
-	return syscall.Futimes(int(f.Fd()), []syscall.Timeval{
+func chftimes(f *os.File, jdfPath string, nsec int64) error {
+	t := syscall.Timespec{
+		Sec: nsec / 1e9, Nsec: nsec % 1e9,
+	}
+	return syscall.UtimesNano(UtimesNano, []syscall.Timespec{
 		t, t,
 	})
 }

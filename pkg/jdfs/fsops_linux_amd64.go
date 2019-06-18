@@ -49,7 +49,7 @@ func fi2im(jdfPath string, fi os.FileInfo) iMeta {
 	}
 }
 
-func chftimes(f *os.File, nsec int64) error {
+func chftimes(f *os.File, jdfPath string, nsec int64) error {
 	t := syscall.NsecToTimeval(nsec)
 	return syscall.Futimes(int(f.Fd()), []syscall.Timeval{
 		t, t,
