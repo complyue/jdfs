@@ -52,7 +52,12 @@ type icdHandle struct {
 // in-core handle to a regular file held open
 type icfHandle struct {
 	isi int
-	f   *os.File
+
+	// f will be kept open until the handle closed
+	f *os.File
+
+	// count of outstanding operations on the file, read/write/sync etc.
+	opc sync.WaitGroup
 }
 
 // in-core filesystem data
@@ -460,23 +465,24 @@ func (icd *icFSD) CreateFileHandle(inode vfs.InodeID, inoF *os.File) (handle vfs
 	return
 }
 
-func (icd *icFSD) GetFileHandle(inode vfs.InodeID, handle int) (icfh icfHandle, err error) {
+func (icd *icFSD) GetFileHandle(inode vfs.InodeID, handle int) (icfh *icfHandle, err error) {
 	icd.mu.Lock()
 	defer icd.mu.Unlock()
 
-	// snapshot the value instead of getting a pointer, tho it's unlikely the handle be
-	// destroyed before read, but just in case.
-	icfh = icd.fileHandles[handle]
+	// the opc field (as a WaitGroup) can not be copied, must return a pointer
+	icfh = &icd.fileHandles[handle]
 
 	if icfh.isi <= 0 { // isi 0 is root dir, not possible to be an opened file
 		err = vfs.ENOENT
 		return
 	}
 
-	ici := &icd.stoInodes[icfh.isi]
-	if ici.inode != inode {
-		err = syscall.ESTALE // TODO fuse kernel is happy with this ?
-		return
+	if inode != 0 { // 0 for no inode to be matched
+		ici := &icd.stoInodes[icfh.isi]
+		if ici.inode != inode {
+			err = syscall.ESTALE // TODO fuse kernel is happy with this ?
+			return
+		}
 	}
 
 	return
@@ -492,12 +498,7 @@ func (icd *icFSD) ReleaseFileHandle(handle int) {
 		panic(errors.New("releasing non-existing file handle ?!"))
 	}
 
-	if err := icfh.f.Close(); err != nil {
-		glog.Errorf("Error on closing jdfs file [%s]/[%s] - %+v",
-			jdfsRootPath, icfh.f.Name(), err)
-	}
-
-	// fill fields with invalid values
+	// fill fields with zero values
 	*icfh = icfHandle{}
 
 	icd.freeFHIdxs = append(icd.freeFHIdxs, handle)

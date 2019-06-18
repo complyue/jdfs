@@ -461,13 +461,21 @@ func (efs *exportedFileSystem) CreateFile(parent vfs.InodeID, name string, mode 
 
 	var ce vfs.ChildInodeEntry
 	handle, fsErr := func() (handle vfs.HandleID, err error) {
+		parentPath := "<?!?>"
 		var cF *os.File
 		defer func() {
 			if e := recover(); e != nil {
 				err = errors.RichError(e)
 			}
-			if err != nil && cF != nil {
-				cF.Close() // don't leak it on error
+			if handle == 0 {
+				if err == nil {
+					panic(errors.New("bug?!"))
+				}
+				if cF != nil { // don't leak file object on error
+					glog.Warningf("File [%s]:[%s]/[%s] created but no handle created for it.",
+						jdfsRootPath, parentPath, name)
+					cF.Close()
+				}
 			}
 		}()
 		ici, ok := efs.icd.GetInode(0, parent)
@@ -480,6 +488,7 @@ func (efs *exportedFileSystem) CreateFile(parent vfs.InodeID, name string, mode 
 			err = e
 			return
 		}
+		parentPath = parentM.jdfPath
 		if ici, ok = efs.icd.LoadInode(0, parentM, outdatedPaths, nil, time.Now()); !ok {
 			err = e
 			return
@@ -488,7 +497,7 @@ func (efs *exportedFileSystem) CreateFile(parent vfs.InodeID, name string, mode 
 		// perform requested FUSE op on local fs
 		childPath := parentM.childPath(name)
 		if cF, err = os.OpenFile(childPath,
-			os.O_CREATE|os.O_EXCL, os.FileMode(mode),
+			os.O_EXCL|os.O_CREATE|os.O_RDWR, os.FileMode(mode),
 		); err != nil {
 			return
 		}
@@ -1076,18 +1085,31 @@ func (efs *exportedFileSystem) OpenFile(inode vfs.InodeID, flags uint32) {
 func (efs *exportedFileSystem) ReadFile(inode vfs.InodeID, handle int, offset int64, bufSz int) {
 	co := efs.ho.Co()
 
-	if err := co.FinishRecv(); err != nil {
-		panic(err)
-	}
-
 	var bytesRead int
 	var buf []byte
 	icfh, fsErr := efs.icd.GetFileHandle(inode, handle)
 	if fsErr == nil {
-		buf = efs.bufPool.Get(bufSz)
-		defer efs.bufPool.Return(buf)
+		func() {
+			// make sure the underlying file is not closed due to handle release,
+			// before this op done
+			icfh.opc.Add(1)
+			defer icfh.opc.Done()
 
-		bytesRead, fsErr = icfh.f.ReadAt(buf, offset)
+			// leverage the fact that HBI conversations over TCP wire is already
+			// serialized by the transport mechanism, simply do add to opc before
+			// releasing the HBI wire is enough.
+			//
+			// TODO implement correct opc before other HBI transport mechanisms (e.g. QUIC)
+			//      those not serializing conversations are to be supported.
+			if err := co.FinishRecv(); err != nil {
+				panic(err)
+			}
+
+			buf = efs.bufPool.Get(bufSz)
+			defer efs.bufPool.Return(buf)
+
+			bytesRead, fsErr = icfh.f.ReadAt(buf, offset)
+		}()
 	}
 
 	if err := co.StartSend(); err != nil {
@@ -1136,13 +1158,26 @@ func (efs *exportedFileSystem) WriteFile(inode vfs.InodeID, handle int, offset i
 		panic(err)
 	}
 
-	if err := co.FinishRecv(); err != nil {
-		panic(err)
-	}
-
 	icfh, fsErr := efs.icd.GetFileHandle(inode, handle)
 	if fsErr == nil {
-		_, fsErr = icfh.f.WriteAt(buf, offset)
+		func() {
+			// make sure the underlying file is not closed due to handle release,
+			// before this op done
+			icfh.opc.Add(1)
+			defer icfh.opc.Done()
+
+			// leverage the fact that HBI conversations over TCP wire is already
+			// serialized by the transport mechanism, simply do add to opc before
+			// releasing the HBI wire is enough.
+			//
+			// TODO implement correct opc before other HBI transport mechanisms (e.g. QUIC)
+			//      those not serializing conversations are to be supported.
+			if err := co.FinishRecv(); err != nil {
+				panic(err)
+			}
+
+			_, fsErr = icfh.f.WriteAt(buf, offset)
+		}()
 	}
 
 	if err := co.StartSend(); err != nil {
@@ -1167,13 +1202,26 @@ func (efs *exportedFileSystem) WriteFile(inode vfs.InodeID, handle int, offset i
 func (efs *exportedFileSystem) SyncFile(inode vfs.InodeID, handle int) {
 	co := efs.ho.Co()
 
-	if err := co.FinishRecv(); err != nil {
-		panic(err)
-	}
-
 	icfh, fsErr := efs.icd.GetFileHandle(inode, handle)
 	if fsErr == nil {
-		fsErr = icfh.f.Sync()
+		func() {
+			// make sure the underlying file is not closed due to handle release,
+			// before this op done
+			icfh.opc.Add(1)
+			defer icfh.opc.Done()
+
+			// leverage the fact that HBI conversations over TCP wire is already
+			// serialized by the transport mechanism, simply do add to opc before
+			// releasing the HBI wire is enough.
+			//
+			// TODO implement correct opc before other HBI transport mechanisms (e.g. QUIC)
+			//      those not serializing conversations are to be supported.
+			if err := co.FinishRecv(); err != nil {
+				panic(err)
+			}
+
+			fsErr = icfh.f.Sync()
+		}()
 	}
 
 	if err := co.StartSend(); err != nil {
@@ -1200,6 +1248,19 @@ func (efs *exportedFileSystem) ReleaseFileHandle(handle int) {
 
 	if err := co.FinishRecv(); err != nil {
 		panic(err)
+	}
+
+	icfh, fsErr := efs.icd.GetFileHandle(0, handle)
+	if fsErr == nil {
+		// wait all operations done before closing the underlying file, or they'll fail
+		icfh.opc.Wait()
+
+		if err := icfh.f.Close(); err != nil {
+			glog.Errorf("Error on closing jdfs file [%s]:[%s] - %+v",
+				jdfsRootPath, icfh.f.Name(), err)
+		}
+	} else {
+		panic(fsErr)
 	}
 
 	efs.icd.ReleaseFileHandle(handle)
