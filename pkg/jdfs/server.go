@@ -306,7 +306,11 @@ func (efs *exportedFileSystem) SetInodeAttributes(inode vfs.InodeID,
 
 			// perform FUSE requested ops on local fs
 			jdfPath := inoM.jdfPath
-			inoF, err := os.OpenFile(jdfPath, os.O_RDWR, 0)
+			oFlags := os.O_RDWR
+			if inoM.attrs.Mode.IsDir() {
+				oFlags = os.O_RDONLY // a folder can only be openend readonly
+			}
+			inoF, err := os.OpenFile(jdfPath, oFlags, 0)
 			if err != nil {
 				return err
 			}
@@ -414,7 +418,13 @@ func (efs *exportedFileSystem) MkDir(parent vfs.InodeID, name string, mode uint3
 			return err
 		}
 		checkTime := time.Now()
-		if cici, ok := efs.icd.LoadInode(1, fi2im(childPath, cFI), nil, nil, checkTime); !ok {
+		childM := fi2im(childPath, cFI)
+		if glog.V(2) {
+			glog.Infof("Made dir [%s]:[%s]/[%s] with mode [%+v] => [%+v]",
+				jdfsRootPath, parentM.jdfPath, name,
+				os.FileMode(mode), cFI.Mode())
+		}
+		if cici, ok := efs.icd.LoadInode(1, childM, nil, nil, checkTime); !ok {
 			return vfs.ENOENT
 		} else {
 			efs.icd.InvalidateChildren(ici.inode, "", name)
@@ -507,7 +517,13 @@ func (efs *exportedFileSystem) CreateFile(parent vfs.InodeID, name string, mode 
 			return
 		}
 		checkTime := time.Now()
-		cici, ok := efs.icd.LoadInode(1, fi2im(childPath, cFI), nil, nil, checkTime)
+		childM := fi2im(childPath, cFI)
+		if glog.V(2) {
+			glog.Infof("Created file [%s]:[%s]/[%s] with mode [%+v] => [%+v]",
+				jdfsRootPath, parentM.jdfPath, name,
+				os.FileMode(mode), cFI.Mode())
+		}
+		cici, ok := efs.icd.LoadInode(1, childM, nil, nil, checkTime)
 		if !ok {
 			err = vfs.ENOENT
 			return
@@ -586,7 +602,13 @@ func (efs *exportedFileSystem) CreateSymlink(parent vfs.InodeID, name string, ta
 			return err
 		}
 		checkTime := time.Now()
-		if cici, ok := efs.icd.LoadInode(1, fi2im(childPath, cFI), nil, nil, checkTime); !ok {
+		childM := fi2im(childPath, cFI)
+		if glog.V(2) {
+			glog.Infof("Created symlink [%s]:[%s]/[%s] -> [%s] with mode [%+v]",
+				jdfsRootPath, parentM.jdfPath, name,
+				target, cFI.Mode())
+		}
+		if cici, ok := efs.icd.LoadInode(1, childM, nil, nil, checkTime); !ok {
 			return vfs.ENOENT
 		} else {
 			efs.icd.InvalidateChildren(ici.inode, "", name)
@@ -665,7 +687,13 @@ func (efs *exportedFileSystem) CreateLink(parent vfs.InodeID, name string, targe
 			return err
 		}
 		checkTime := time.Now()
-		if cici, ok := efs.icd.LoadInode(1, fi2im(childPath, cFI), nil, nil, checkTime); !ok {
+		childM := fi2im(childPath, cFI)
+		if glog.V(2) {
+			glog.Infof("Created Link [%s]:[%s]/[%s] with mode [%+v]",
+				jdfsRootPath, parentM.jdfPath, name,
+				cFI.Mode())
+		}
+		if cici, ok := efs.icd.LoadInode(1, childM, nil, nil, checkTime); !ok {
 			return vfs.ENOENT
 		} else {
 			efs.icd.InvalidateChildren(ici.inode, "", name)
@@ -795,6 +823,11 @@ func (efs *exportedFileSystem) RmDir(parent vfs.InodeID, name string) {
 			return err
 		}
 
+		if glog.V(2) {
+			glog.Infof("Removed dir [%s]:[%s]/[%s]",
+				jdfsRootPath, parentM.jdfPath, name)
+		}
+
 		efs.icd.InvalidateChildren(ici.inode, name, "")
 
 		return nil
@@ -843,6 +876,11 @@ func (efs *exportedFileSystem) Unlink(parent vfs.InodeID, name string) {
 		childPath := parentM.childPath(name)
 		if err = syscall.Unlink(childPath); err != nil {
 			return err
+		}
+
+		if glog.V(2) {
+			glog.Infof("Removed file [%s]:[%s]/[%s]",
+				jdfsRootPath, parentM.jdfPath, name)
 		}
 
 		efs.icd.InvalidateChildren(ici.inode, "", name)

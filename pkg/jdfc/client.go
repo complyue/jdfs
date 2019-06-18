@@ -395,6 +395,8 @@ MkDir(%#v, %#v, %#v)
 		return err
 	}
 
+	fs.mapOwner(&op.Entry.Attributes)
+
 	return
 }
 
