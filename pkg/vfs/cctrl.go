@@ -63,5 +63,5 @@ const (
 	//
 	// Beware: this value is ignored on OS X, where entry caching is disabled by
 	// default. See notes on MountConfig.EnableVnodeCaching for more.
-	DIR_CHILDREN_CACHE_TIME = 2 * time.Hour
+	DIR_CHILDREN_CACHE_TIME = 10 * time.Millisecond
 )
