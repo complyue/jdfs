@@ -1247,7 +1247,7 @@ func (efs *exportedFileSystem) ReadSymlink(inode vfs.InodeID) {
 		panic(fsErr)
 	}
 
-	if err := co.SendObj(target); err != nil {
+	if err := co.SendObj(hbi.Repr(target)); err != nil {
 		panic(err)
 	}
 }
