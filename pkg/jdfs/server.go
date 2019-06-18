@@ -327,7 +327,8 @@ func (efs *exportedFileSystem) SetInodeAttributes(inode vfs.InodeID,
 
 			if chgSize {
 				if glog.V(2) {
-					glog.Infof("Setting size of file [%s]:[%s] to %d bytes", jdfsRootPath, jdfPath, sz)
+					glog.Infof("Setting size of [%d] [%s]:[%s] to %d bytes", ici.inode,
+						jdfsRootPath, jdfPath, sz)
 				}
 
 				if err := inoF.Truncate(int64(sz)); err != nil {
@@ -337,7 +338,8 @@ func (efs *exportedFileSystem) SetInodeAttributes(inode vfs.InodeID,
 
 			if chgMode {
 				if glog.V(2) {
-					glog.Infof("Setting mode of file [%s]:[%s] to [%+v]", jdfsRootPath, jdfPath, os.FileMode(mode))
+					glog.Infof("Setting mode of [%d] [%s]:[%s] to [%+v]", ici.inode,
+						jdfsRootPath, jdfPath, os.FileMode(mode))
 				}
 
 				if err := inoF.Chmod(os.FileMode(mode)); err != nil {
@@ -347,7 +349,8 @@ func (efs *exportedFileSystem) SetInodeAttributes(inode vfs.InodeID,
 
 			if chgMtime {
 				if glog.V(2) {
-					glog.Infof("Setting mtim of file [%s]:[%s] to %v", jdfsRootPath, jdfPath, time.Unix(0, mNsec))
+					glog.Infof("Setting mtim of [%d] [%s]:[%s] to %v", ici.inode,
+						jdfsRootPath, jdfPath, time.Unix(0, mNsec))
 				}
 
 				if err := chftimes(inoF, jdfPath, mNsec); err != nil {
@@ -557,8 +560,8 @@ func (efs *exportedFileSystem) CreateFile(parent vfs.InodeID, name string, mode 
 		}
 
 		if glog.V(2) {
-			glog.Infof("Created file [%s]:[%s]/[%s] with mode [%+v] => [%+v], as handle %d",
-				jdfsRootPath, parentM.jdfPath, name,
+			glog.Infof("Created file [%d] [%s]:[%s]/[%s] with mode [%+v] => [%+v], as handle %d",
+				cici.inode, jdfsRootPath, parentM.jdfPath, name,
 				os.FileMode(mode), cFI.Mode(), handle)
 		}
 
@@ -1144,8 +1147,8 @@ func (efs *exportedFileSystem) OpenFile(inode vfs.InodeID, flags uint32) {
 		}
 
 		if glog.V(2) {
-			glog.Infof("Opened file [%s]:[%s] with flags=%x, as handle %d",
-				jdfsRootPath, jdfPath, flags, handle)
+			glog.Infof("Opened file [%d] [%s]:[%s] with flags=%x, as handle %d",
+				ici.inode, jdfsRootPath, jdfPath, flags, handle)
 		}
 
 		return
@@ -1203,8 +1206,8 @@ func (efs *exportedFileSystem) ReadFile(inode vfs.InodeID, handle int, offset in
 			bytesRead, fsErr = icfh.f.ReadAt(buf, offset)
 
 			if glog.V(2) {
-				glog.Infof("Read %d bytes @%d from file [%s]:[%s]", bytesRead, offset,
-					jdfsRootPath, icfh.f.Name())
+				glog.Infof("Read %d bytes @%d from file [%d] [%s]:[%s] with handle %d", bytesRead, offset,
+					icfh.inode, jdfsRootPath, icfh.f.Name(), handle)
 			}
 		}()
 	}
@@ -1277,8 +1280,8 @@ func (efs *exportedFileSystem) WriteFile(inode vfs.InodeID, handle int, offset i
 			bytesWritten, fsErr = icfh.f.WriteAt(buf, offset)
 
 			if glog.V(2) {
-				glog.Infof("Written %d bytes @%d to file [%s]:[%s]", bytesWritten, offset,
-					jdfsRootPath, icfh.f.Name())
+				glog.Infof("Written %d bytes @%d to file [%d] [%s]:[%s] with handle %d", bytesWritten, offset,
+					icfh.inode, jdfsRootPath, icfh.f.Name(), handle)
 			}
 		}()
 	}
@@ -1326,7 +1329,7 @@ func (efs *exportedFileSystem) SyncFile(inode vfs.InodeID, handle int) {
 			fsErr = icfh.f.Sync()
 
 			if glog.V(2) {
-				glog.Infof("Sync'ed file [%s]:[%s]", jdfsRootPath, icfh.f.Name())
+				glog.Infof("Sync'ed file [%d] [%s]:[%s]", icfh.inode, jdfsRootPath, icfh.f.Name())
 			}
 		}()
 	}
@@ -1368,7 +1371,8 @@ func (efs *exportedFileSystem) ReleaseFileHandle(handle int) {
 		}
 
 		if glog.V(2) {
-			glog.Infof("File handle %d closed for file [%s]:[%s]", handle, jdfsRootPath, icfh.f.Name())
+			glog.Infof("File handle %d closed for file [%d] [%s]:[%s]", handle, icfh.inode,
+				jdfsRootPath, icfh.f.Name())
 		}
 	} else {
 		panic(fsErr)

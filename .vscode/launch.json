@@ -18,7 +18,8 @@
             "args": [
                 "-v=2",
                 "-solo",
-                "/tmp/jdf"
+                // "/tmp/jdf"
+                "/Volumes/RamDisk"
             ]
         },
         {

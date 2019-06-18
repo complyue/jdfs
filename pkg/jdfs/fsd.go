@@ -87,6 +87,8 @@ type icdHandle struct {
 type icfHandle struct {
 	isi int
 
+	inode vfs.InodeID
+
 	// f will be kept open until the handle closed
 	f *os.File
 
@@ -492,12 +494,12 @@ func (icd *icFSD) CreateFileHandle(inode vfs.InodeID, inoF *os.File) (handle vfs
 		hsi = icd.freeFHIdxs[nFreeHdls-1]
 		icd.freeFHIdxs = icd.freeFHIdxs[:nFreeHdls-1]
 		icd.fileHandles[hsi] = icfHandle{
-			isi: isi, f: inoF,
+			isi: isi, inode: ici.inode, f: inoF,
 		}
 	} else {
 		hsi = len(icd.fileHandles)
 		icd.fileHandles = append(icd.fileHandles, icfHandle{
-			isi: isi, f: inoF,
+			isi: isi, inode: ici.inode, f: inoF,
 		})
 	}
 	handle = vfs.HandleID(hsi)

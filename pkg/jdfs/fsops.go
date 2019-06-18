@@ -72,6 +72,11 @@ func statInode(inode vfs.InodeID, reachedThrough []string) (
 		} else {
 			inoM = im
 			ok = true
+
+			if glog.V(2) {
+				glog.Infof("STAT [%d] [%s]:[%s] nlink=%d, size=%d", im.inode, jdfsRootPath, jdfPath,
+					im.attrs.Nlink, im.attrs.Size)
+			}
 		}
 
 		break // got inoM of same inode
@@ -129,8 +134,8 @@ func readInodeDir(parentInode vfs.InodeID, reachedThrough []string) (
 
 		childM = fi2im(parentM.childPath(childFI.Name()), childFI)
 		if glog.V(2) {
-			glog.Infof("Inode [%v]:[%v] is [%s]:[%s]/[%s]", childM.dev, childM.inode,
-				jdfsRootPath, parentPath, childFI.Name())
+			glog.Infof("LS [%s]:[%s]/[%s] is inode [%v]:[%v]", jdfsRootPath, parentPath, childFI.Name(),
+				childM.dev, childM.inode)
 		}
 
 		if childM.dev != jdfRootDevice {
