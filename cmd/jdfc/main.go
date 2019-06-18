@@ -166,13 +166,18 @@ Simple usage:
 	if len(jdfsPort) <= 0 {
 		jdfsPort = "1112"
 	}
-	jdfHost := jdfsHostName + ":" + jdfsPort
-	fsName := fmt.Sprintf("jdfs://%s/%s", jdfHost, jdfsPath)
+	jdfsHost := jdfsHostName + ":" + jdfsPort
+
+	if strings.HasPrefix(jdfsPath, "/") {
+		jdfsPath = jdfsPath[1:] // make sure jdfsPath is always relative
+	}
+
+	fsName := fmt.Sprintf("jdfs://%s/%s", jdfsHost, jdfsPath)
 
 	if jdfsURL == nil {
 		jdfsURL = &url.URL{
 			Scheme: "jdfs",
-			Host:   jdfHost,
+			Host:   jdfsHost,
 			Path:   jdfsPath,
 		}
 	}
@@ -208,7 +213,7 @@ Simple usage:
 		cfg.DebugLogger = log.New(os.Stderr, "jdfc: ", 0)
 	}
 
-	if err = jdfc.MountJDFS(jdfc.ConnTCP(jdfHost), jdfsPath, mpFullPath, cfg); err != nil {
+	if err = jdfc.MountJDFS(jdfc.ConnTCP(jdfsHost), jdfsPath, mpFullPath, cfg); err != nil {
 		log.Fatal(err)
 	}
 }
