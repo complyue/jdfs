@@ -19,7 +19,7 @@ func statFS(rootDir *os.File) (op vfs.StatFSOp, err error) {
 	op.Blocks = fsStat.Blocks
 	op.BlocksFree = fsStat.Bfree
 	op.BlocksAvailable = fsStat.Bavail
-	op.IoSize = uint32(fsStat.Bsize)
+	op.IoSize = uint32(4096)
 	op.Inodes = fsStat.Files
 	op.InodesFree = fsStat.Ffree
 
