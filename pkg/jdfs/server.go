@@ -35,16 +35,6 @@ type exportedFileSystem struct {
 	po *hbi.PostingEnd
 	ho *hbi.HostingEnd
 
-	// effective uid/gid of jdfs process, this is told to jdfc when initially
-	// mounted, jdfc is supposed to translate all inode owner uid/gid of these values
-	// to its FUSE uid/gid as exposed to client kernel/applications, so the owning uid/gid of
-	// inodes stored in the backing fs at jdfs can be different from the FUSE uid/gid
-	// at jdfc, while those files/dirs appear owned by the FUSE uid/gid.
-	//
-	// TODO decide handling of uid/gid other than these values, to leave them as is, or
-	//      maybe a good idea to translate to a fixed value (e.g. 0=root, 1=daemon) ?
-	jdfsUID, jdfsGID int
-
 	// whether readOnly, as jdfc requested on initial mount
 	readOnly bool
 
@@ -65,9 +55,6 @@ func (efs *exportedFileSystem) NamesToExpose() []string {
 }
 
 func (efs *exportedFileSystem) Mount(readOnly bool, jdfsPath string) {
-	efs.jdfsUID = os.Geteuid()
-	efs.jdfsGID = os.Getegid()
-
 	efs.readOnly = readOnly
 
 	var rootPath string
@@ -91,7 +78,7 @@ func (efs *exportedFileSystem) Mount(readOnly bool, jdfsPath string) {
 
 	// send mount result fields
 	if err := co.SendObj(hbi.Repr(hbi.LitListType{
-		jdfRootInode, efs.jdfsUID, efs.jdfsGID,
+		jdfRootInode, jdfsUID, jdfsGID,
 	})); err != nil {
 		panic(err)
 	}
@@ -311,10 +298,27 @@ func (efs *exportedFileSystem) SetInodeAttributes(inode vfs.InodeID,
 
 			// perform FUSE requested ops on local fs
 			jdfPath := inoM.jdfPath
-			oFlags := os.O_RDWR
-			if inoM.attrs.Mode.IsDir() {
-				oFlags = os.O_RDONLY // a folder can only be openend readonly
+
+			oFlags := os.O_RDONLY            // open readonly as fallback
+			if inoM.attrs.Mode.IsRegular() { // only consider writable open for regular file
+				// open the file writable is more desirable, esp. to change file size
+				// but if it is readonly, open writable will fail, insisting so will make jdfc
+				// unable to chmod a readonly file to be writable.
+				if inoM.attrs.Uid == jdfsUID {
+					if inoM.attrs.Mode&(1<<7) != 0 {
+						oFlags = os.O_RDWR
+					}
+				} else if inoM.attrs.Gid == jdfsGID {
+					if inoM.attrs.Mode&(1<<4) != 0 {
+						oFlags = os.O_RDWR
+					}
+				} else {
+					if inoM.attrs.Mode&(1<<1) != 0 {
+						oFlags = os.O_RDWR
+					}
+				}
 			}
+
 			inoF, err := os.OpenFile(jdfPath, oFlags, 0)
 			if err != nil {
 				return err

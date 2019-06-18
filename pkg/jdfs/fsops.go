@@ -10,27 +10,6 @@ import (
 	"github.com/golang/glog"
 )
 
-var (
-	// absolute path at jdfs host for the mounted root dir
-	jdfsRootPath string
-
-	// hold the JDFS mounted root dir open, so as to prevent it from unlinked,
-	// until jdfc disconnected.
-	jdfRootDir *os.File
-
-	// device of JDFS mounted root dir
-	//
-	// nested directory with other filesystems mounted will be hidden to jdfc
-	jdfRootDevice int64
-
-	// inode value of the JDFS mounted root dir
-	//
-	// jdfc is not restricted to only mount root of local filesystem at jdfs host,
-	// in case a nested dir is mounted as JDFS root, inode of mounted root will be other
-	// than 1, which is the constant for FUSE fs root.
-	jdfRootInode vfs.InodeID
-)
-
 type iMeta struct {
 	jdfPath string
 	name    string

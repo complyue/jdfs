@@ -11,6 +11,37 @@ import (
 	"github.com/golang/glog"
 )
 
+var (
+	// effective uid/gid of jdfs process, this is told to jdfc when initially
+	// mounted, jdfc is supposed to translate all inode owner uid/gid of these values
+	// to its FUSE uid/gid as exposed to client kernel/applications, so the owning uid/gid of
+	// inodes stored in the backing fs at jdfs can be different from the FUSE uid/gid
+	// at jdfc, while those files/dirs appear owned by the FUSE uid/gid.
+	//
+	// TODO decide handling of uid/gid other than these values, to leave them as is, or
+	//      maybe a good idea to translate to a fixed value (e.g. 0=root, 1=daemon) ?
+	jdfsUID, jdfsGID uint32
+
+	// absolute path at jdfs host for the mounted root dir
+	jdfsRootPath string
+
+	// hold the JDFS mounted root dir open, so as to prevent it from unlinked,
+	// until jdfc disconnected.
+	jdfRootDir *os.File
+
+	// device of JDFS mounted root dir
+	//
+	// nested directory with other filesystems mounted will be hidden to jdfc
+	jdfRootDevice int64
+
+	// inode value of the JDFS mounted root dir
+	//
+	// jdfc is not restricted to only mount root of local filesystem at jdfs host,
+	// in case a nested dir is mounted as JDFS root, inode of mounted root will be other
+	// than 1, which is the constant for FUSE fs root.
+	jdfRootInode vfs.InodeID
+)
+
 // in-core inode info
 type icInode struct {
 	// meta data of this inode
@@ -87,6 +118,9 @@ type icFSD struct {
 }
 
 func (icd *icFSD) init(readOnly bool) error {
+	jdfsUID = uint32(os.Geteuid())
+	jdfsGID = uint32(os.Getegid())
+
 	if err := os.Chdir(jdfsRootPath); err != nil {
 		return errors.Errorf("Error chdir to jdfs path: [%s] - %+v", jdfsRootPath, err)
 	}
