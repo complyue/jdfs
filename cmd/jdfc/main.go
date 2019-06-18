@@ -68,7 +68,14 @@ Simple usage:
 	if fpi, err := os.Stat(mpFullPath); err != nil {
 		if os.IsNotExist(err) {
 			log.Fatalf("Mountpoint [%s] does not exists!", mpFullPath)
-		} else {
+		}
+		// try unmount in case the previous jdfc process just crashed,
+		// leaving an unresponsive mountpoint giving error if stat'ed.
+		glog.Warningf("Try unmounting [%s] as it appears not accessible ...", mpFullPath)
+		if err = fuse.Unmount(mpFullPath); err == nil {
+			fpi, err = os.Stat(mpFullPath)
+		}
+		if err != nil { // really inaccessible even after unmounted first
 			log.Fatalf("Can not stat mountpoint path [%s] - %+v", mpFullPath, err)
 		}
 	} else if !fpi.IsDir() {
