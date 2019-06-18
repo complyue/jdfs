@@ -65,22 +65,29 @@ Simple usage:
 	if err != nil {
 		log.Fatalf("Error resolving mountpoint path [%s] - %+v", mpArg, err)
 	}
-	if fpi, err := os.Stat(mpFullPath); err != nil {
-		if os.IsNotExist(err) {
-			log.Fatalf("Mountpoint [%s] does not exists!", mpFullPath)
-		}
-		// try unmount in case the previous jdfc process just crashed,
-		// leaving an unresponsive mountpoint giving error if stat'ed.
+	// broken fuse mountpoint will fail to stat on Linux but not on macOS,
+	// readdir will fail on both, so ls the mountpoint to determine whether there's
+	// a previous fuse mount broken (jdfc crashed most prolly).
+	df, err := os.OpenFile(mpFullPath, os.O_RDONLY, 0)
+	if err != nil {
 		glog.Warningf("Try unmounting [%s] as it appears not accessible ...", mpFullPath)
+		// try unmount a broken fuse mount first, or this jdfc can not succeed mounting.
 		if err = fuse.Unmount(mpFullPath); err == nil {
-			fpi, err = os.Stat(mpFullPath)
+			if df, err = os.OpenFile(mpFullPath, os.O_RDONLY, 0); err == nil {
+				if names, err := df.Readdirnames(0); err != nil {
+					log.Fatalf("Can not ls mountpoint path [%s] - %+v", mpFullPath, err)
+					os.Exit(5)
+				} else if len(names) > 0 {
+					glog.V(1).Infof("Mounting on non-empty dir [%s] with %d children.", mpFullPath, len(names))
+				}
+			}
 		}
-		if err != nil { // really inaccessible even after unmounted first
-			log.Fatalf("Can not stat mountpoint path [%s] - %+v", mpFullPath, err)
-		}
-	} else if !fpi.IsDir() {
-		log.Fatalf("Mountpoint [%s] not a dir!", mpFullPath)
 	}
+	if err != nil {
+		log.Fatalf("Can not read mountpoint [%s] - %+v", mpFullPath, err)
+		os.Exit(5)
+	}
+	defer df.Close()
 
 	jdfsHostName, jdfsPort := "", ""
 	jdfPath := "/"
