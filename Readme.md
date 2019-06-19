@@ -8,14 +8,20 @@ with responsibilities (such as
 ) those beyond upright data availability & consistency, offloaded. Its purpose
 has a few implications, including:
 
-- It's highly vulnerable if exposed to untrusted environments, it's necessary
-  to implemented sufficient access control by other means, e.g.
+- It's highly vulnerable if exposed to untrusted environments. When access must
+  cross trust boundaries, some other means, e.g.
   [SSH tunneling](https://www.ssh.com/ssh/tunneling/)
   or
-  [VPN](https://en.wikipedia.org/wiki/Virtual_private_network).
+  [VPN](https://en.wikipedia.org/wiki/Virtual_private_network)
+  should be implemented to guard the exposed mountpoints.
+- Files and directories at **jdfs** host's local filesystem are exposed to
+  **jdfc** with owner identity mapped, files ownend by the uid/gid running the
+  **jdfs** process will appear at **jdfc** as if owned by the uid/gid mounted
+  the JDFS mountpoint, and file creation/reading/writing/deleting all follow
+  this proxy relationship.
 - The performance is terrible at serving many small files as all meta data
   read/write must go roundtrip the network layer, bcoz FUSE kernel cache
-  is not workable for networked filesystem.
+  is not workable for networked filesystems.
 
 Simply deployed alone (1 **jdfs** <=> n **jdfc**), JDFS seeks to replace
 [NFS](https://en.wikipedia.org/wiki/Network_File_System)
@@ -56,11 +62,9 @@ proxies all file operations on behalf of the **jdfc**:
 - read/write/mmap
   - forged by all FUSE kernels
 
-Any new connection is treated by the **jdfs** as a fresh new mount,
-a fresh server process is started to proxy all operations from the
-connecting **jdfc**.
+Any new connection is treated by the **jdfs** as a fresh new mount, a fresh server
+process is started to proxy all operations from the connecting **jdfc**.
 
 And all server side states, including resource occupation from os perspective,
 will be naturally freed/released by means of that the **jdfs** process,
 just exits, once the underlying JDFS connection is disconnected.
-
