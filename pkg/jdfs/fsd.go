@@ -307,8 +307,8 @@ func (icd *icFSD) InvalidateChildren(inode vfs.InodeID,
 	}
 }
 
-func (icd *icFSD) ForgetInode(inode vfs.InodeID, n int) {
-	if inode == jdfRootInode {
+func (icd *icFSD) ForgetInode(inode vfs.InodeID, n int) (refcnt int) {
+	if inode == vfs.RootInodeID {
 		panic(errors.Errorf("forget root ?!"))
 	}
 
@@ -332,35 +332,14 @@ func (icd *icFSD) ForgetInode(inode vfs.InodeID, n int) {
 	}
 
 	if ici.refcnt > 0 {
-		return // still referenced
-	}
-
-	icd.forgetInode(inode)
-}
-
-// must have icd.mu locked
-func (icd *icFSD) forgetInode(inode vfs.InodeID) {
-	isi, ok := icd.regInodes[inode]
-	if !ok {
-		panic(errors.Errorf("inode [%v] not in-core ?!", inode))
-	}
-	ici := &icd.stoInodes[isi]
-
-	if ici.refcnt > 0 {
-		return // still referenced
+		return ici.refcnt // still referenced
 	}
 
 	delete(icd.regInodes, inode)
-	icd.stoInodes[isi] = icInode{} // clear all fields to zero values
+	icd.stoInodes[isi] = icInode{} // fill all fields with zero values
 	icd.freeInoIdxs = append(icd.freeInoIdxs, isi)
 
-	if ici.children == nil {
-		return // no children cached
-	}
-
-	for _, cInode := range ici.children {
-		icd.forgetInode(cInode)
-	}
+	return 0
 }
 
 // must have icd.mu locked

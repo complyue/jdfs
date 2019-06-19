@@ -395,7 +395,8 @@ func (efs *exportedFileSystem) SetInodeAttributes(inode vfs.InodeID,
 }
 
 func (efs *exportedFileSystem) ForgetInode(inode vfs.InodeID, n int) {
-	if inode == vfs.RootInodeID || inode == jdfRootInode {
+	if inode == vfs.RootInodeID {
+		glog.Warning("forgetting root inode ?!")
 		return // never forget about root
 	}
 
@@ -405,7 +406,11 @@ func (efs *exportedFileSystem) ForgetInode(inode vfs.InodeID, n int) {
 		panic(err)
 	}
 
-	efs.icd.ForgetInode(inode, n)
+	refcnt := efs.icd.ForgetInode(inode, n)
+
+	if glog.V(2) {
+		glog.Infof("FORGET inode [%d] refcnt -%d => %d", inode, n, refcnt)
+	}
 }
 
 func (efs *exportedFileSystem) MkDir(parent vfs.InodeID, name string, mode uint32) {
@@ -796,6 +801,18 @@ func (efs *exportedFileSystem) Rename(oldParent vfs.InodeID, oldName string, new
 		newPath := newParentM.childPath(newName)
 		if err = os.Rename(oldPath, newPath); err != nil {
 			return err
+		}
+
+		// load meta data of renamed file to update its reachedThrough list
+		newFI, err := os.Lstat(newPath)
+		if err != nil {
+			return err
+		}
+		checkTime := time.Now()
+		newM := fi2im(newPath, newFI)
+		_, ok = efs.icd.LoadInode(0, newM, []string{oldPath}, nil, checkTime)
+		if !ok {
+			return vfs.ENOENT
 		}
 
 		if glog.V(2) {
