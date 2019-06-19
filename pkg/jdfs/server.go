@@ -11,10 +11,43 @@ import (
 	"unsafe"
 
 	"github.com/complyue/hbi"
+	"github.com/complyue/hbi/interop"
 	"github.com/complyue/jdfs/pkg/errors"
 	"github.com/complyue/jdfs/pkg/vfs"
+
 	"github.com/golang/glog"
 )
+
+func newServiceEnv(exportRoot string) *hbi.HostingEnv {
+	// prepare the hosting environment to be reacting to jdfc
+	he := hbi.NewHostingEnv()
+	// expose names for interop
+	interop.ExposeInterOpValues(he)
+	// expose portable fs error constants
+	he.ExposeValue("EOKAY", vfs.EOKAY)
+	he.ExposeValue("EEXIST", vfs.EEXIST)
+	he.ExposeValue("EINVAL", vfs.EINVAL)
+	he.ExposeValue("EIO", vfs.EIO)
+	he.ExposeValue("ENOENT", vfs.ENOENT)
+	he.ExposeValue("ENOSYS", vfs.ENOSYS)
+	he.ExposeValue("ENOTDIR", vfs.ENOTDIR)
+	he.ExposeValue("ENOTEMPTY", vfs.ENOTEMPTY)
+	he.ExposeValue("ENOATTR", vfs.ENOATTR)
+
+	he.ExposeFunction("__hbi_init__", // callback on wire connected
+		func(po *hbi.PostingEnd, ho *hbi.HostingEnd) {
+			efs := &exportedFileSystem{
+				exportRoot: exportRoot,
+
+				po: po, ho: ho,
+			}
+
+			// expose efs as the reactor
+			he.ExposeReactor(efs)
+		})
+
+	return he
+}
 
 type exportedFileSystem struct {
 	// the root directory that this JDFS server is willing to export.
@@ -112,7 +145,7 @@ func (efs *exportedFileSystem) LookUpInode(parent vfs.InodeID, name string) {
 	}
 
 	var ce vfs.ChildInodeEntry
-	fse := vfs.FsError(func() error {
+	fse := vfs.FsErr(func() error {
 		ici, ok := efs.icd.GetInode(0, parent)
 		if !ok {
 			return vfs.ENOENT
@@ -200,7 +233,7 @@ func (efs *exportedFileSystem) LookUpInode(parent vfs.InodeID, name string) {
 		panic(err)
 	}
 
-	if err := co.SendObj(fmt.Sprintf("%#x", int(fse))); err != nil {
+	if err := co.SendObj(fse.Repr()); err != nil {
 		panic(err)
 	}
 	if fse != 0 {
@@ -242,8 +275,8 @@ func (efs *exportedFileSystem) GetInodeAttributes(inode vfs.InodeID) {
 		panic(err)
 	}
 
-	fse := vfs.FsError(fsErr)
-	if err := co.SendObj(fmt.Sprintf("%#x", int(fse))); err != nil {
+	fse := vfs.FsErr(fsErr)
+	if err := co.SendObj(fse.Repr()); err != nil {
 		panic(err)
 	}
 	if fse != 0 {
@@ -268,7 +301,7 @@ func (efs *exportedFileSystem) SetInodeAttributes(inode vfs.InodeID,
 
 	var attrs vfs.InodeAttributes
 
-	fse := vfs.FsError(func() error {
+	fse := vfs.FsErr(func() error {
 		if ici, ok := efs.icd.GetInode(0, inode); !ok {
 			return vfs.ENOENT // no such inode
 		} else if inoM, outdatedPaths, err := statInode(ici.inode, ici.reachedThrough); err != nil {
@@ -357,7 +390,7 @@ func (efs *exportedFileSystem) SetInodeAttributes(inode vfs.InodeID,
 		panic(err)
 	}
 
-	if err := co.SendObj(fmt.Sprintf("%#x", int(fse))); err != nil {
+	if err := co.SendObj(fse.Repr()); err != nil {
 		panic(err)
 	}
 	if fse != 0 {
@@ -398,7 +431,7 @@ func (efs *exportedFileSystem) MkDir(parent vfs.InodeID, name string, mode uint3
 
 	var ce vfs.ChildInodeEntry
 
-	fse := vfs.FsError(func() error {
+	fse := vfs.FsErr(func() error {
 		ici, ok := efs.icd.GetInode(0, parent)
 		if !ok {
 			return vfs.ENOENT
@@ -444,7 +477,7 @@ func (efs *exportedFileSystem) MkDir(parent vfs.InodeID, name string, mode uint3
 		panic(err)
 	}
 
-	if err := co.SendObj(fmt.Sprintf("%#x", int(fse))); err != nil {
+	if err := co.SendObj(fse.Repr()); err != nil {
 		panic(err)
 	}
 	if fse != 0 {
@@ -543,8 +576,8 @@ func (efs *exportedFileSystem) CreateFile(parent vfs.InodeID, name string, mode 
 		panic(err)
 	}
 
-	fse := vfs.FsError(fsErr)
-	if err := co.SendObj(fmt.Sprintf("%#x", int(fse))); err != nil {
+	fse := vfs.FsErr(fsErr)
+	if err := co.SendObj(fse.Repr()); err != nil {
 		panic(err)
 	}
 	if fse != 0 {
@@ -570,7 +603,7 @@ func (efs *exportedFileSystem) CreateSymlink(parent vfs.InodeID, name string, ta
 
 	var ce vfs.ChildInodeEntry
 
-	fse := vfs.FsError(func() error {
+	fse := vfs.FsErr(func() error {
 		ici, ok := efs.icd.GetInode(0, parent)
 		if !ok {
 			return vfs.ENOENT
@@ -618,7 +651,7 @@ func (efs *exportedFileSystem) CreateSymlink(parent vfs.InodeID, name string, ta
 		panic(err)
 	}
 
-	if err := co.SendObj(fmt.Sprintf("%#x", int(fse))); err != nil {
+	if err := co.SendObj(fse.Repr()); err != nil {
 		panic(err)
 	}
 	if fse != 0 {
@@ -640,7 +673,7 @@ func (efs *exportedFileSystem) CreateLink(parent vfs.InodeID, name string, targe
 
 	var ce vfs.ChildInodeEntry
 
-	fse := vfs.FsError(func() error {
+	fse := vfs.FsErr(func() error {
 		ici, ok := efs.icd.GetInode(0, parent)
 		if !ok {
 			return vfs.ENOENT
@@ -697,7 +730,7 @@ func (efs *exportedFileSystem) CreateLink(parent vfs.InodeID, name string, targe
 		panic(err)
 	}
 
-	if err := co.SendObj(fmt.Sprintf("%#x", int(fse))); err != nil {
+	if err := co.SendObj(fse.Repr()); err != nil {
 		panic(err)
 	}
 	if fse != 0 {
@@ -717,7 +750,7 @@ func (efs *exportedFileSystem) Rename(oldParent vfs.InodeID, oldName string, new
 		panic(err)
 	}
 
-	fse := vfs.FsError(func() error {
+	fse := vfs.FsErr(func() error {
 		iciOldParent, ok := efs.icd.GetInode(0, oldParent)
 		if !ok {
 			return vfs.ENOENT
@@ -779,7 +812,7 @@ func (efs *exportedFileSystem) Rename(oldParent vfs.InodeID, oldName string, new
 		panic(err)
 	}
 
-	if err := co.SendObj(fmt.Sprintf("%#x", int(fse))); err != nil {
+	if err := co.SendObj(fse.Repr()); err != nil {
 		panic(err)
 	}
 	if fse != 0 {
@@ -794,7 +827,7 @@ func (efs *exportedFileSystem) RmDir(parent vfs.InodeID, name string) {
 		panic(err)
 	}
 
-	fse := vfs.FsError(func() error {
+	fse := vfs.FsErr(func() error {
 		ici, ok := efs.icd.GetInode(0, parent)
 		if !ok {
 			return vfs.ENOENT
@@ -827,7 +860,7 @@ func (efs *exportedFileSystem) RmDir(parent vfs.InodeID, name string) {
 		panic(err)
 	}
 
-	if err := co.SendObj(fmt.Sprintf("%#x", int(fse))); err != nil {
+	if err := co.SendObj(fse.Repr()); err != nil {
 		panic(err)
 	}
 	if fse != 0 {
@@ -842,7 +875,7 @@ func (efs *exportedFileSystem) Unlink(parent vfs.InodeID, name string) {
 		panic(err)
 	}
 
-	fse := vfs.FsError(func() error {
+	fse := vfs.FsErr(func() error {
 		ici, ok := efs.icd.GetInode(0, parent)
 		if !ok {
 			return vfs.ENOENT
@@ -875,7 +908,7 @@ func (efs *exportedFileSystem) Unlink(parent vfs.InodeID, name string) {
 		panic(err)
 	}
 
-	if err := co.SendObj(fmt.Sprintf("%#x", int(fse))); err != nil {
+	if err := co.SendObj(fse.Repr()); err != nil {
 		panic(err)
 	}
 	if fse != 0 {
@@ -891,7 +924,7 @@ func (efs *exportedFileSystem) OpenDir(inode vfs.InodeID) {
 	}
 
 	var handle vfs.HandleID
-	fse := vfs.FsError(func() error {
+	fse := vfs.FsErr(func() error {
 		ici, ok := efs.icd.GetInode(0, inode)
 		if !ok {
 			return vfs.ENOENT
@@ -955,7 +988,7 @@ func (efs *exportedFileSystem) OpenDir(inode vfs.InodeID) {
 		panic(err)
 	}
 
-	if err := co.SendObj(fmt.Sprintf("%#x", int(fse))); err != nil {
+	if err := co.SendObj(fse.Repr()); err != nil {
 		panic(err)
 	}
 	if fse != 0 {
@@ -1000,8 +1033,8 @@ func (efs *exportedFileSystem) ReadDir(inode vfs.InodeID, handle int, offset int
 		panic(err)
 	}
 
-	fse := vfs.FsError(fsErr)
-	if err := co.SendObj(fmt.Sprintf("%#x", int(fse))); err != nil {
+	fse := vfs.FsErr(fsErr)
+	if err := co.SendObj(fse.Repr()); err != nil {
 		panic(err)
 	}
 	if fse != 0 {
@@ -1085,8 +1118,8 @@ func (efs *exportedFileSystem) OpenFile(inode vfs.InodeID, flags uint32) {
 		panic(err)
 	}
 
-	fse := vfs.FsError(fsErr)
-	if err := co.SendObj(fmt.Sprintf("%#x", int(fse))); err != nil {
+	fse := vfs.FsErr(fsErr)
+	if err := co.SendObj(fse.Repr()); err != nil {
 		panic(err)
 	}
 	if fse != 0 {
@@ -1143,8 +1176,8 @@ func (efs *exportedFileSystem) ReadFile(inode vfs.InodeID, handle int, offset in
 		fsErr = nil
 	}
 
-	fse := vfs.FsError(fsErr)
-	if err := co.SendObj(fmt.Sprintf("%#x", int(fse))); err != nil {
+	fse := vfs.FsErr(fsErr)
+	if err := co.SendObj(fse.Repr()); err != nil {
 		panic(err)
 	}
 	if fse != 0 {
@@ -1205,8 +1238,8 @@ func (efs *exportedFileSystem) WriteFile(inode vfs.InodeID, handle int, offset i
 		panic(err)
 	}
 
-	fse := vfs.FsError(fsErr)
-	if err := co.SendObj(fmt.Sprintf("%#x", int(fse))); err != nil {
+	fse := vfs.FsErr(fsErr)
+	if err := co.SendObj(fse.Repr()); err != nil {
 		panic(err)
 	}
 	if fse != 0 {
@@ -1247,8 +1280,8 @@ func (efs *exportedFileSystem) SyncFile(inode vfs.InodeID, handle int) {
 		panic(err)
 	}
 
-	fse := vfs.FsError(fsErr)
-	if err := co.SendObj(fmt.Sprintf("%#x", int(fse))); err != nil {
+	fse := vfs.FsErr(fsErr)
+	if err := co.SendObj(fse.Repr()); err != nil {
 		panic(err)
 	}
 	if fse != 0 {
@@ -1323,8 +1356,8 @@ func (efs *exportedFileSystem) ReadSymlink(inode vfs.InodeID) {
 		panic(err)
 	}
 
-	fse := vfs.FsError(fsErr)
-	if err := co.SendObj(fmt.Sprintf("%#x", int(fse))); err != nil {
+	fse := vfs.FsErr(fsErr)
+	if err := co.SendObj(fse.Repr()); err != nil {
 		panic(err)
 	}
 	if fse != 0 {

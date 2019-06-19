@@ -16,7 +16,7 @@
 package vfs
 
 import (
-	"log"
+	"fmt"
 	"os"
 	"runtime"
 	"syscall"
@@ -24,61 +24,79 @@ import (
 	"github.com/golang/glog"
 )
 
+// FsError is the cross-platform error type for portable filesystem errors.
+//
+// error values of this type are transfered in literal const name (its Repr()) over HBI wire.
+type FsError syscall.Errno
+
 const (
+	// EOKAY is the placeholder for no error, this is necessary as a FsError value needs
+	// to be exchanged among jdfs/jdfc even on success.
+	EOKAY = FsError(0)
+
 	// Errors corresponding to kernel error numbers. These may be treated
 	// specially by Connection.Reply.
 
-	EEXIST    = syscall.Errno(0x11)
-	EINVAL    = syscall.Errno(0x16)
-	EIO       = syscall.Errno(0x5)
-	ENOENT    = syscall.Errno(0x2)
-	ENOSYS    = syscall.Errno(0x4e)
-	ENOTDIR   = syscall.Errno(0x14)
-	ENOTEMPTY = syscall.Errno(0x42)
+	EEXIST    = FsError(syscall.EEXIST)
+	EINVAL    = FsError(syscall.EINVAL)
+	EIO       = FsError(syscall.EIO)
+	ENOENT    = FsError(syscall.ENOENT)
+	ENOSYS    = FsError(syscall.ENOSYS)
+	ENOTDIR   = FsError(syscall.ENOTDIR)
+	ENOTEMPTY = FsError(syscall.ENOTEMPTY)
 
-	// ENOATTR and ENODATA diverse greatly among OSes,
-	// so long as JDFS doesn't support xattr, it's only returned from jdfc to FUSE kernel.
-	// jdfs is not supposed to be involved with xattr, so no transfer between jdfs and jdfc.
-	ENOATTR = syscall.ENODATA
+	// ENOATTR and/or ENODATA diverse greatly among OSes,
+	// using ENODATA for ENOATTR should work for Linux/macOS/Solaris(SmartOS),
+	// some BSDs may not work, but none of BSDs is supported by JDFS so far.
+	ENOATTR = FsError(syscall.ENODATA)
 )
 
-// validate system error number consistency as far as FUSE kernel concerned
-func init() {
-	if EEXIST != syscall.EEXIST {
-		log.Fatalf("FUSE errno EEXIST=%d incompatible with %s %s !", EEXIST, runtime.GOOS, runtime.GOARCH)
-	}
-	if EINVAL != syscall.EINVAL {
-		log.Fatalf("FUSE errno EINVAL=%d incompatible with %s %s !", EINVAL, runtime.GOOS, runtime.GOARCH)
-	}
-	if EIO != syscall.EIO {
-		log.Fatalf("FUSE errno EIO=%d incompatible with %s %s !", EIO, runtime.GOOS, runtime.GOARCH)
-	}
-	if ENOENT != syscall.ENOENT {
-		log.Fatalf("FUSE errno ENOENT=%d incompatible with %s %s !", ENOENT, runtime.GOOS, runtime.GOARCH)
-	}
-	if ENOSYS != syscall.ENOSYS {
-		log.Fatalf("FUSE errno ENOSYS=%d incompatible with %s %s !", ENOSYS, runtime.GOOS, runtime.GOARCH)
-	}
-	if ENOTDIR != syscall.ENOTDIR {
-		log.Fatalf("FUSE errno ENOTDIR=%d incompatible with %s %s !", ENOTDIR, runtime.GOOS, runtime.GOARCH)
-	}
-	if ENOTEMPTY != syscall.ENOTEMPTY {
-		log.Fatalf("FUSE errno ENOTEMPTY=%d incompatible with %s %s !", ENOTEMPTY, runtime.GOOS, runtime.GOARCH)
-	}
+// implementing builtin error interface
+func (fse FsError) Error() string {
+	return syscall.Errno(fse).Error()
 }
 
-// FsError converts error occurred on jdfs local filesystem to an error number passable to jdfc
-func FsError(fsErr error) syscall.Errno {
+// Repr returns the const name of the error value, for representation to appear in
+// peer script as to be executed by HBI interpreters.
+func (fse FsError) Repr() string {
+	switch fse {
+	case EOKAY:
+		return "EOKAY"
+	case EEXIST:
+		return "EEXIST"
+	case EINVAL:
+		return "EINVAL"
+	case EIO:
+		return "EIO"
+	case ENOENT:
+		return "ENOENT"
+	case ENOSYS:
+		return "ENOSYS"
+	case ENOTDIR:
+		return "ENOTDIR"
+	case ENOTEMPTY:
+		return "ENOTEMPTY"
+	case ENOATTR:
+		return "ENOATTR"
+	}
+	panic(fmt.Sprintf("Unexpected file system error number %#x on %s %s",
+		int(fse), runtime.GOOS, runtime.GOARCH))
+}
+
+// FsErr converts an arbitrary error occurred on jdfs local filesystem to the portable FsError type
+func FsErr(fsErr error) FsError {
 	switch fse := fsErr.(type) {
 	case nil:
-		return 0
+		return EOKAY
 	case syscall.Errno:
-		return fse
+		// todo validate the error number is portable here ?
+		return FsError(fse)
 	case *os.PathError:
 		glog.Errorf("FS operation [%s] on path [%s] failed: [%T] - %+v", fse.Op, fse.Path, fse.Err, fse.Err)
-		return FsError(fse.Err)
+		return FsErr(fse.Err)
 	default:
 		glog.Errorf("Unexpected local fs error [%T] - %+v", fsErr, fsErr)
 	}
+	// use EIO as fallback error
 	return EIO
 }

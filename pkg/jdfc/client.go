@@ -62,6 +62,16 @@ func MountJDFS(
 	he := hbi.NewHostingEnv()
 	// expose names for interop
 	interop.ExposeInterOpValues(he)
+	// expose portable fs error constants
+	he.ExposeValue("EOKAY", vfs.EOKAY)
+	he.ExposeValue("EEXIST", vfs.EEXIST)
+	he.ExposeValue("EINVAL", vfs.EINVAL)
+	he.ExposeValue("EIO", vfs.EIO)
+	he.ExposeValue("ENOENT", vfs.ENOENT)
+	he.ExposeValue("ENOSYS", vfs.ENOSYS)
+	he.ExposeValue("ENOTDIR", vfs.ENOTDIR)
+	he.ExposeValue("ENOTEMPTY", vfs.ENOTEMPTY)
+	he.ExposeValue("ENOATTR", vfs.ENOATTR)
 	// expose fs as the reactor
 	he.ExposeReactor(fs)
 
@@ -251,10 +261,12 @@ LookUpInode(%#v, %#v)
 		return
 	}
 
-	if errno, err := co.RecvObj(); err != nil {
+	if fsErr, err := co.RecvObj(); err != nil {
 		return err
-	} else if en := errno.(hbi.LitIntType); en != 0 {
-		return syscall.Errno(en) // TODO assess errno compatibility esp. when jdfs/jdfc run different Arch/OSes
+	} else if fse, ok := fsErr.(vfs.FsError); !ok {
+		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
+	} else if fse != 0 {
+		return syscall.Errno(fse)
 	}
 
 	bufView := ((*[unsafe.Sizeof(op.Entry)]byte)(unsafe.Pointer(&op.Entry)))[:unsafe.Sizeof(op.Entry)]
@@ -286,10 +298,12 @@ GetInodeAttributes(%#v)
 		return
 	}
 
-	if errno, err := co.RecvObj(); err != nil {
+	if fsErr, err := co.RecvObj(); err != nil {
 		return err
-	} else if en := errno.(hbi.LitIntType); en != 0 {
-		return syscall.Errno(en) // TODO assess errno compatibility esp. when jdfs/jdfc run different Arch/OSes
+	} else if fse, ok := fsErr.(vfs.FsError); !ok {
+		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
+	} else if fse != 0 {
+		return syscall.Errno(fse)
 	}
 
 	bufView := ((*[unsafe.Sizeof(op.Attributes)]byte)(unsafe.Pointer(&op.Attributes)))[:unsafe.Sizeof(op.Attributes)]
@@ -340,10 +354,12 @@ SetInodeAttributes(%#v,%#v, %#v, %#v,%#v, %#v, %#v)
 		return err
 	}
 
-	if errno, err := co.RecvObj(); err != nil {
+	if fsErr, err := co.RecvObj(); err != nil {
 		return err
-	} else if en := errno.(hbi.LitIntType); en != 0 {
-		return syscall.Errno(en) // TODO assess errno compatibility esp. when jdfs/jdfc run different Arch/OSes
+	} else if fse, ok := fsErr.(vfs.FsError); !ok {
+		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
+	} else if fse != 0 {
+		return syscall.Errno(fse)
 	}
 
 	bufView := ((*[unsafe.Sizeof(op.Attributes)]byte)(unsafe.Pointer(&op.Attributes)))[:unsafe.Sizeof(op.Attributes)]
@@ -393,14 +409,12 @@ MkDir(%#v, %#v, %#v)
 		return err
 	}
 
-	errno, err := co.RecvObj()
-	if err != nil {
+	if fsErr, err := co.RecvObj(); err != nil {
 		return err
-	}
-	if en, ok := errno.(hbi.LitIntType); !ok {
-		panic(errors.Errorf("unexpected errno type [%T] of errno value [%v]", errno, errno))
-	} else if en != 0 {
-		return syscall.Errno(en)
+	} else if fse, ok := fsErr.(vfs.FsError); !ok {
+		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
+	} else if fse != 0 {
+		return syscall.Errno(fse)
 	}
 
 	bufView := ((*[unsafe.Sizeof(op.Entry)]byte)(unsafe.Pointer(&op.Entry)))[:unsafe.Sizeof(op.Entry)]
@@ -439,14 +453,12 @@ CreateFile(%#v, %#v, %#v)
 		return err
 	}
 
-	errno, err := co.RecvObj()
-	if err != nil {
+	if fsErr, err := co.RecvObj(); err != nil {
 		return err
-	}
-	if en, ok := errno.(hbi.LitIntType); !ok {
-		panic(errors.Errorf("unexpected errno type [%T] of errno value [%v]", errno, errno))
-	} else if en != 0 {
-		return syscall.Errno(en)
+	} else if fse, ok := fsErr.(vfs.FsError); !ok {
+		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
+	} else if fse != 0 {
+		return syscall.Errno(fse)
 	}
 
 	handle, err := co.RecvObj()
@@ -488,14 +500,12 @@ CreateSymlink(%#v, %#v, %#v)
 		return err
 	}
 
-	errno, err := co.RecvObj()
-	if err != nil {
+	if fsErr, err := co.RecvObj(); err != nil {
 		return err
-	}
-	if en, ok := errno.(hbi.LitIntType); !ok {
-		panic(errors.Errorf("unexpected errno type [%T] of errno value [%v]", errno, errno))
-	} else if en != 0 {
-		return syscall.Errno(en)
+	} else if fse, ok := fsErr.(vfs.FsError); !ok {
+		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
+	} else if fse != 0 {
+		return syscall.Errno(fse)
 	}
 
 	bufView := ((*[unsafe.Sizeof(op.Entry)]byte)(unsafe.Pointer(&op.Entry)))[:unsafe.Sizeof(op.Entry)]
@@ -527,14 +537,12 @@ CreateLink(%#v, %#v, %#v)
 		return err
 	}
 
-	errno, err := co.RecvObj()
-	if err != nil {
+	if fsErr, err := co.RecvObj(); err != nil {
 		return err
-	}
-	if en, ok := errno.(hbi.LitIntType); !ok {
-		panic(errors.Errorf("unexpected errno type [%T] of errno value [%v]", errno, errno))
-	} else if en != 0 {
-		return syscall.Errno(en)
+	} else if fse, ok := fsErr.(vfs.FsError); !ok {
+		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
+	} else if fse != 0 {
+		return syscall.Errno(fse)
 	}
 
 	bufView := ((*[unsafe.Sizeof(op.Entry)]byte)(unsafe.Pointer(&op.Entry)))[:unsafe.Sizeof(op.Entry)]
@@ -566,14 +574,12 @@ Rename(%#v, %#v, %#v, %#v)
 		return err
 	}
 
-	errno, err := co.RecvObj()
-	if err != nil {
+	if fsErr, err := co.RecvObj(); err != nil {
 		return err
-	}
-	if en, ok := errno.(hbi.LitIntType); !ok {
-		panic(errors.Errorf("unexpected errno type [%T] of errno value [%v]", errno, errno))
-	} else if en != 0 {
-		return syscall.Errno(en)
+	} else if fse, ok := fsErr.(vfs.FsError); !ok {
+		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
+	} else if fse != 0 {
+		return syscall.Errno(fse)
 	}
 
 	return
@@ -598,14 +604,12 @@ RmDir(%#v, %#v)
 		return err
 	}
 
-	errno, err := co.RecvObj()
-	if err != nil {
+	if fsErr, err := co.RecvObj(); err != nil {
 		return err
-	}
-	if en, ok := errno.(hbi.LitIntType); !ok {
-		panic(errors.Errorf("unexpected errno type [%T] of errno value [%v]", errno, errno))
-	} else if en != 0 {
-		return syscall.Errno(en)
+	} else if fse, ok := fsErr.(vfs.FsError); !ok {
+		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
+	} else if fse != 0 {
+		return syscall.Errno(fse)
 	}
 
 	return
@@ -630,14 +634,12 @@ Unlink(%#v, %#v)
 		return err
 	}
 
-	errno, err := co.RecvObj()
-	if err != nil {
+	if fsErr, err := co.RecvObj(); err != nil {
 		return err
-	}
-	if en, ok := errno.(hbi.LitIntType); !ok {
-		panic(errors.Errorf("unexpected errno type [%T] of errno value [%v]", errno, errno))
-	} else if en != 0 {
-		return syscall.Errno(en)
+	} else if fse, ok := fsErr.(vfs.FsError); !ok {
+		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
+	} else if fse != 0 {
+		return syscall.Errno(fse)
 	}
 
 	return
@@ -662,14 +664,12 @@ OpenDir(%#v)
 		return err
 	}
 
-	errno, err := co.RecvObj()
-	if err != nil {
+	if fsErr, err := co.RecvObj(); err != nil {
 		return err
-	}
-	if en, ok := errno.(hbi.LitIntType); !ok {
-		panic(errors.Errorf("unexpected errno type [%T] of errno value [%v]", errno, errno))
-	} else if en != 0 {
-		return syscall.Errno(en)
+	} else if fse, ok := fsErr.(vfs.FsError); !ok {
+		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
+	} else if fse != 0 {
+		return syscall.Errno(fse)
 	}
 
 	handle, err := co.RecvObj()
@@ -704,14 +704,12 @@ ReadDir(%#v, %#v, %#v, %#v)
 		return err
 	}
 
-	errno, err := co.RecvObj()
-	if err != nil {
+	if fsErr, err := co.RecvObj(); err != nil {
 		return err
-	}
-	if en, ok := errno.(hbi.LitIntType); !ok {
-		panic(errors.Errorf("unexpected errno type [%T] of errno value [%v]", errno, errno))
-	} else if en != 0 {
-		return syscall.Errno(en)
+	} else if fse, ok := fsErr.(vfs.FsError); !ok {
+		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
+	} else if fse != 0 {
+		return syscall.Errno(fse)
 	}
 
 	bytesRead, err := co.RecvObj()
@@ -774,14 +772,12 @@ OpenFile(%#v, %#v)
 		return err
 	}
 
-	errno, err := co.RecvObj()
-	if err != nil {
+	if fsErr, err := co.RecvObj(); err != nil {
 		return err
-	}
-	if en, ok := errno.(hbi.LitIntType); !ok {
-		panic(errors.Errorf("unexpected errno type [%T] of errno value [%v]", errno, errno))
-	} else if en != 0 {
-		return syscall.Errno(en)
+	} else if fse, ok := fsErr.(vfs.FsError); !ok {
+		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
+	} else if fse != 0 {
+		return syscall.Errno(fse)
 	}
 
 	handle, err := co.RecvObj()
@@ -816,14 +812,12 @@ ReadFile(%#v, %#v, %#v, %#v)
 		return err
 	}
 
-	errno, err := co.RecvObj()
-	if err != nil {
+	if fsErr, err := co.RecvObj(); err != nil {
 		return err
-	}
-	if en, ok := errno.(hbi.LitIntType); !ok {
-		panic(errors.Errorf("unexpected errno type [%T] of errno value [%v]", errno, errno))
-	} else if en != 0 {
-		return syscall.Errno(en)
+	} else if fse, ok := fsErr.(vfs.FsError); !ok {
+		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
+	} else if fse != 0 {
+		return syscall.Errno(fse)
 	}
 
 	bytesRead, err := co.RecvObj()
@@ -878,14 +872,12 @@ WriteFile(%#v, %#v, %#v, %#v)
 		return err
 	}
 
-	errno, err := co.RecvObj()
-	if err != nil {
+	if fsErr, err := co.RecvObj(); err != nil {
 		return err
-	}
-	if en, ok := errno.(hbi.LitIntType); !ok {
-		panic(errors.Errorf("unexpected errno type [%T] of errno value [%v]", errno, errno))
-	} else if en != 0 {
-		return syscall.Errno(en)
+	} else if fse, ok := fsErr.(vfs.FsError); !ok {
+		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
+	} else if fse != 0 {
+		return syscall.Errno(fse)
 	}
 
 	return
@@ -910,14 +902,12 @@ SyncFile(%#v, %#v)
 		return err
 	}
 
-	errno, err := co.RecvObj()
-	if err != nil {
+	if fsErr, err := co.RecvObj(); err != nil {
 		return err
-	}
-	if en, ok := errno.(hbi.LitIntType); !ok {
-		panic(errors.Errorf("unexpected errno type [%T] of errno value [%v]", errno, errno))
-	} else if en != 0 {
-		return syscall.Errno(en)
+	} else if fse, ok := fsErr.(vfs.FsError); !ok {
+		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
+	} else if fse != 0 {
+		return syscall.Errno(fse)
 	}
 
 	return
@@ -971,14 +961,12 @@ ReadSymlink(%#v)
 		return err
 	}
 
-	errno, err := co.RecvObj()
-	if err != nil {
+	if fsErr, err := co.RecvObj(); err != nil {
 		return err
-	}
-	if en, ok := errno.(hbi.LitIntType); !ok {
-		panic(errors.Errorf("unexpected errno type [%T] of errno value [%v]", errno, errno))
-	} else if en != 0 {
-		return syscall.Errno(en)
+	} else if fse, ok := fsErr.(vfs.FsError); !ok {
+		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
+	} else if fse != 0 {
+		return syscall.Errno(fse)
 	}
 
 	target, err := co.RecvObj()

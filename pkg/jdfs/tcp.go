@@ -7,7 +7,6 @@ import (
 	"os"
 
 	"github.com/complyue/hbi"
-	"github.com/complyue/hbi/interop"
 	"github.com/complyue/hbi/mp"
 )
 
@@ -31,22 +30,7 @@ func ExportTCP(exportRoot string, servAddr string) (err error) {
 	}
 
 	if err = servMethod(servAddr, func() *hbi.HostingEnv {
-		he := hbi.NewHostingEnv()
-
-		interop.ExposeInterOpValues(he)
-
-		he.ExposeFunction("__hbi_init__", // callback on wire connected
-			func(po *hbi.PostingEnd, ho *hbi.HostingEnd) {
-				efs := &exportedFileSystem{
-					exportRoot: exportRoot,
-
-					po: po, ho: ho,
-				}
-
-				he.ExposeReactor(efs)
-			})
-
-		return he
+		return newServiceEnv(exportRoot)
 	}, func(listener *net.TCPListener) {
 		fmt.Fprintf(os.Stderr, "JDFS server for [%s] listening: %s\n",
 			exportRoot, listener.Addr())
