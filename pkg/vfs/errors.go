@@ -94,7 +94,9 @@ func FsErr(fsErr error) FsError {
 		// todo validate the error number is portable here ?
 		return FsError(fse)
 	case *os.PathError:
-		glog.Errorf("FS operation [%s] on path [%s] failed: [%T] - %+v", fse.Op, fse.Path, fse.Err, fse.Err)
+		cwd, _ := os.Getwd() // jdfs process would chdir to mounted root
+		glog.Errorf("FS operation [%s] on path [%s]:[%s] failed: [%T] - %+v",
+			fse.Op, cwd, fse.Path, fse.Err, fse.Err)
 		return FsErr(fse.Err)
 	default:
 		glog.Errorf("Unexpected local fs error [%T] - %+v", fsErr, fsErr)
