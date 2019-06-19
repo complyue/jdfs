@@ -88,6 +88,8 @@ func FsErr(fsErr error) FsError {
 	switch fse := fsErr.(type) {
 	case nil:
 		return EOKAY
+	case FsError:
+		return fse
 	case syscall.Errno:
 		// todo validate the error number is portable here ?
 		return FsError(fse)
