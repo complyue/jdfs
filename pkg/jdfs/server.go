@@ -25,10 +25,10 @@ type exportedFileSystem struct {
 	// multiple local filesystems can be separately mounted under this path for different
 	// jdfc to mount.
 	//
-	// TODO for a JDFS mount to expose nested filesystems under its mounted root dir,
+	// todo for a JDFS mount to expose nested filesystems under its mounted root dir,
 	// there're possibilities that inode numbers from different fs collide, maybe FUSE
 	// generationNumber can be used to support that, or just don't support nested fs over
-	// JDFS.
+	// JDFS, as what we are doing now.
 	exportRoot string
 
 	// HBI posting/hosting ends

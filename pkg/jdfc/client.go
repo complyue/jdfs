@@ -81,7 +81,20 @@ func MountJDFS(
 			fmt.Printf("jdfs disconnected due to: %s", discReason)
 			os.Exit(6)
 		}
-		// TODO auto reconnect
+
+		// terminate jdfc (the FUSE user process) for now, this leaves the mountpoint
+		// denying all services. this is actually better than unmounting it, as naive
+		// programs may think all files have been deleted due to the unmount, or even
+		// start writing new files under paths of the mountpoint (which is not JDFS anymore).
+		//
+		// next run of jdfc for the same mountpoint will try unmounting immediately
+		// before new mounting attempt, if broken FUSE mount detected. that's not
+		// perfect yet, but opens much smaller window of time for naive programs working
+		// on the JDFS mount to make mistakes.
+		os.Exit(0)
+
+		// todo auto reconnect jdfs. but need to figure out the way to tell FUSE kernel
+		//      to invalidate all cache and handles in this case ?
 	})
 
 	if err = dialHBI(); err != nil {
