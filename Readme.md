@@ -21,7 +21,8 @@ has a few implications, including:
   this proxy relationship.
 - The performance is terrible at serving many small files as all meta data
   read/write must go roundtrip the network layer, bcoz FUSE kernel cache
-  is not workable for networked filesystems.
+  is not workable for networked filesystems. Tho extensive caching can be
+  implemented by **jdfc**, that's low priority.
 
 Simply deployed alone (1 **jdfs** <=> n **jdfc**), JDFS seeks to replace
 [NFS](https://en.wikipedia.org/wiki/Network_File_System)
