@@ -205,10 +205,6 @@ Simple usage:
 			fmt.Sprintf("%s%%%s", jdfsHost, jdfsPath),
 		),
 
-		// caching should be okay once InvalidateNode/InvalidateEntry are implemented and
-		// cache invalidated appropriately. Tracking: https://github.com/jacobsa/fuse/issues/64
-		EnableVnodeCaching: true,
-
 		ErrorLogger: log.New(os.Stderr, "jdfc: ", 0),
 
 		Options: mntOpts,

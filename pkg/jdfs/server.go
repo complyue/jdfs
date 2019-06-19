@@ -120,7 +120,9 @@ func (efs *exportedFileSystem) LookUpInode(parent vfs.InodeID, name string) {
 		// the children map won't be modified after armed to ici, no sync needed to read it
 		children := ici.children
 
-		if children == nil || time.Now().Sub(ici.lastChildrenChecked) > vfs.DIR_CHILDREN_CACHE_TIME {
+		// cache dir entries at jdfs side with 10ms timeout.
+		// note this has nothing to do with FUSE kernel caching.
+		if children == nil || time.Now().Sub(ici.lastChildrenChecked) > 10*time.Millisecond {
 			// read dir contents from local fs, cache to children list
 			parentM, childMs, outdatedPaths, err := readInodeDir(parent, ici.reachedThrough)
 			if err != nil {
@@ -232,8 +234,7 @@ func (efs *exportedFileSystem) GetInodeAttributes(inode vfs.InodeID) {
 
 	if ici, ok := efs.icd.GetInode(0, inode); !ok {
 		fsErr = vfs.ENOENT
-	} else if time.Now().Sub(ici.lastChecked) > vfs.META_ATTRS_CACHE_TIME {
-		// refresh after cache time out
+	} else {
 		if inoM, outdatedPaths, err := statInode(
 			ici.inode, ici.reachedThrough,
 		); err != nil {
@@ -243,9 +244,6 @@ func (efs *exportedFileSystem) GetInodeAttributes(inode vfs.InodeID) {
 		} else {
 			attrs = ici.attrs
 		}
-	} else {
-		// use cached attrs
-		attrs = ici.attrs
 	}
 
 	if err := co.StartSend(); err != nil {

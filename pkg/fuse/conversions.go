@@ -21,7 +21,6 @@ import (
 	"os"
 	"reflect"
 	"syscall"
-	"time"
 	"unsafe"
 
 	// vfs was separated from this package (fuse) to be dependable by jdfs while
@@ -647,15 +646,11 @@ func (c *Connection) kernelResponseForOp(
 	case *GetInodeAttributesOp:
 		size := int(AttrOutSize(c.protocol))
 		out := (*AttrOut)(m.Grow(size))
-		out.AttrValid = uint64(META_ATTRS_CACHE_TIME / time.Second)
-		out.AttrValidNsec = uint32(META_ATTRS_CACHE_TIME % time.Second)
 		convertAttributes(o.Inode, &o.Attributes, &out.Attr)
 
 	case *SetInodeAttributesOp:
 		size := int(AttrOutSize(c.protocol))
 		out := (*AttrOut)(m.Grow(size))
-		out.AttrValid = uint64(META_ATTRS_CACHE_TIME / time.Second)
-		out.AttrValidNsec = uint32(META_ATTRS_CACHE_TIME % time.Second)
 		convertAttributes(o.Inode, &o.Attributes, &out.Attr)
 
 	case *MkDirOp:
@@ -871,10 +866,6 @@ func convertChildInodeEntry(
 	out *EntryOut) {
 	out.Nodeid = uint64(in.Child)
 	out.Generation = uint64(in.Generation)
-	out.EntryValid = uint64(DIR_CHILDREN_CACHE_TIME / time.Second)
-	out.EntryValidNsec = uint32(DIR_CHILDREN_CACHE_TIME % time.Second)
-	out.AttrValid = uint64(META_ATTRS_CACHE_TIME / time.Second)
-	out.AttrValidNsec = uint32(META_ATTRS_CACHE_TIME % time.Second)
 
 	convertAttributes(in.Child, &in.Attributes, &out.Attr)
 }
