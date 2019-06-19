@@ -27,7 +27,7 @@ scenarios where
 
 But the main purpose of JDFS is to contribute data focused, performance-critical
 parts (i.e. components at various granularity, with **jdfs** - the service/server,
-and **jdfc** - the consumer/client the most coarse ones) into analytical solutions
+and **jdfc** - the consumer/client, the most coarse ones) into analytical solutions
 (e.g. a homegrown
 [array database](https://en.wikipedia.org/wiki/Array_DBMS)
 ), with ease.
@@ -56,10 +56,11 @@ proxies all file operations on behalf of the **jdfc**:
 - read/write/mmap
   - forged by all FUSE kernels
 
-All server side states, including resource occupation from os perspective,
+Any new connection is treated by the **jdfs** as a fresh new mount,
+a fresh server process is started to proxy all operations from the
+connecting **jdfc**.
+
+And all server side states, including resource occupation from os perspective,
 will be naturally freed/released by means of that the **jdfs** process,
 just exits, once the underlying JDFS connection is disconnected.
 
-And any new connection is treated by the **jdfs** as a fresh new mount,
-such that a fresh server process is started serving each incoming JDFS
-request.
