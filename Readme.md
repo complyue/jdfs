@@ -5,9 +5,19 @@
 [userspace filesystem](https://en.wikipedia.org/wiki/Filesystem_in_Userspace)
 with responsibilities (such as
 [access control](https://en.wikipedia.org/wiki/Access_control)
-) those beyond upright data availability & consistency, offloaded.
+) those beyond upright data availability & consistency, offloaded. Its purpose
+has a few implications, including:
 
-Simply deployed alone (1 JDFS server <=> n JDFS clients), JDFS seeks to replace
+- It's highly vulnerable if exposed to untrusted environments, it's necessary
+  to implemented sufficient access control by other means, e.g.
+  [SSH tunneling](https://www.ssh.com/ssh/tunneling/)
+  or
+  [VPN](https://en.wikipedia.org/wiki/Virtual_private_network).
+- The performance is terrible at serving many small files as all meta data
+  read/write must go roundtrip the network layer, bcoz FUSE kernel cache
+  is not workable for networked filesystem.
+
+Simply deployed alone (1 **jdfs** <=> n **jdfc**), JDFS seeks to replace
 [NFS](https://en.wikipedia.org/wiki/Network_File_System)
 in many
 [HPC](https://en.wikipedia.org/wiki/High-performance_computing)
@@ -16,8 +26,9 @@ scenarios where
 .
 
 But the main purpose of JDFS is to contribute data focused, performance-critical
-parts (i.e. components at various granularity, with server and client the most
-coarse ones) into analytical solutions (e.g. a homegrown
+parts (i.e. components at various granularity, with **jdfs** - the service/server,
+and **jdfc** - the consumer/client the most coarse ones) into analytical solutions
+(e.g. a homegrown
 [array database](https://en.wikipedia.org/wiki/Array_DBMS)
 ), with ease.
 
@@ -34,24 +45,21 @@ coarse ones) into analytical solutions (e.g. a homegrown
 —— Michael Stonebraker
 [2014](https://www.datanami.com/2014/04/09/array_databases_the_next_big_thing_in_data_analytics_/)
 
+JDFS server is stateful, in contrast to NFS, a **jdfs** process basically
+proxies all file operations on behalf of the **jdfc**:
 
-JDFS server is stateful, in contrast to NFS, a JDFS server process basically
-proxies all file operations on behalf of the JDFS client, i.e. keep files
-open, locked, mmap'ed and synced, and etc.
+- fsync
+  - always mapped 1 to 1
+- open/close
+  - mapped 1 to 1 from **jdfc** on Linux
+  - forged by osxfuse from **jdfc** on macOS
+- read/write/mmap
+  - forged by all FUSE kernels
 
 All server side states, including resource occupation from os perspective,
-will be naturally freed/released by means of that the JDFS server process,
+will be naturally freed/released by means of that the **jdfs** process,
 just exits, once the underlying JDFS connection is disconnected.
 
-If the disconnection is unexpected by the very JDFS client, it should fail
-all pending fs operations, and discard all cached data as well, at the client
-side.
-
-The client can choose to fail hard by unmounting the client fs, or decide
-to keep the mounted fs under certain circumstances, and reconnect to JDFS
-server. In this case it can tell client applications accessing the mounted
-JDFS to try again.
-
-But any new connection is treated by the JDFS server as a fresh new mount,
+And any new connection is treated by the **jdfs** as a fresh new mount,
 such that a fresh server process is started serving each incoming JDFS
-connection.
+request.
