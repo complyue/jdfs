@@ -33,6 +33,10 @@ func (s *fileSystemServer) ServeOps(c *fuse.Connection) {
 			panic(err)
 		}
 
+		if _, ok := op.(*fuse.DestroyOp); ok {
+			break
+		}
+
 		s.opsInFlight.Add(1)
 		go s.handleOp(c, ctx, op)
 	}

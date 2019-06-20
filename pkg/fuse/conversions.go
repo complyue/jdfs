@@ -555,6 +555,9 @@ func convertInMessage(
 			Flags: in.Flags,
 		}
 
+	case OpDestroy:
+		o = &DestroyOp{}
+
 	default:
 		o = &unknownOp{
 			OpCode: inMsg.Header().Opcode,

@@ -48,3 +48,7 @@ type initOp struct {
 	MaxReadahead uint32
 	MaxWrite     uint32
 }
+
+type DestroyOp struct {
+	// destroy
+}
