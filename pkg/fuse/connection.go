@@ -530,6 +530,8 @@ func (c *Connection) InvalidateNode(nodeID vfs.InodeID, off int64, size int64) e
 	out.Ino = uint64(nodeID)
 	out.Off = off
 	out.Len = size
+
+	outMsg.header.Len = uint32(outMsg.Len())
 	return c.writeMessage(outMsg.Bytes())
 }
 
@@ -560,5 +562,7 @@ func (c *Connection) InvalidateEntry(parent vfs.InodeID, name string) error {
 	out.Parent = uint64(parent)
 	out.Namelen = uint32(len(name))
 	outMsg.AppendString(name)
+
+	outMsg.header.Len = uint32(outMsg.Len())
 	return c.writeMessage(outMsg.Bytes())
 }
