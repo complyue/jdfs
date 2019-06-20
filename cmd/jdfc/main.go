@@ -13,6 +13,7 @@ import (
 
 	"github.com/complyue/jdfs/pkg/fuse"
 	"github.com/complyue/jdfs/pkg/jdfc"
+	"github.com/complyue/jdfs/pkg/vfs"
 
 	"github.com/golang/glog"
 )
@@ -208,6 +209,12 @@ Simple usage:
 		ErrorLogger: log.New(os.Stderr, "jdfc: ", 0),
 
 		Options: mntOpts,
+	}
+
+	if vfs.CacheValidSeconds > 0 {
+		// caching should be okay as we are actively invalidating it when needed,
+		// but explicitly setting it to zero can disable the cache
+		cfg.EnableVnodeCaching = true
 	}
 
 	if glog.V(2) {

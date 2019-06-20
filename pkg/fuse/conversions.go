@@ -646,11 +646,17 @@ func (c *Connection) kernelResponseForOp(
 	case *GetInodeAttributesOp:
 		size := int(AttrOutSize(c.protocol))
 		out := (*AttrOut)(m.Grow(size))
+
+		out.AttrValid = CacheValidSeconds
+
 		convertAttributes(o.Inode, &o.Attributes, &out.Attr)
 
 	case *SetInodeAttributesOp:
 		size := int(AttrOutSize(c.protocol))
 		out := (*AttrOut)(m.Grow(size))
+
+		out.AttrValid = CacheValidSeconds
+
 		convertAttributes(o.Inode, &o.Attributes, &out.Attr)
 
 	case *MkDirOp:
@@ -746,7 +752,7 @@ func (c *Connection) kernelResponseForOp(
 		out.St.Files = o.Inodes
 		out.St.Ffree = o.InodesFree
 
-		// The posix spec for sys/statvfs.h (http://goo.gl/LktgrF) defines the
+		// The posix spec for sys/stath (http://goo.gl/LktgrF) defines the
 		// following fields of statvfs, among others:
 		//
 		//     f_bsize    File system block size.
@@ -866,6 +872,9 @@ func convertChildInodeEntry(
 	out *EntryOut) {
 	out.Nodeid = uint64(in.Child)
 	out.Generation = uint64(in.Generation)
+
+	out.AttrValid = CacheValidSeconds
+	out.EntryValid = CacheValidSeconds
 
 	convertAttributes(in.Child, &in.Attributes, &out.Attr)
 }

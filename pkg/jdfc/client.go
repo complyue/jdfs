@@ -221,13 +221,17 @@ Mount(%#v, %#v)
 func (fs *fileSystem) InvalidateNode(
 	inode vfs.InodeID, offset, size int64,
 ) {
-	fs.fuseConn.InvalidateNode(inode, offset, size)
+	if err := fs.fuseConn.InvalidateNode(inode, offset, size); err != nil && err != vfs.ENOENT {
+		glog.Fatalf("Unexpected fuse kernel error on inode invalidation [%T] - %+v", err, err)
+	}
 }
 
 func (fs *fileSystem) InvalidateEntry(
 	parent vfs.InodeID, name string,
 ) {
-	fs.fuseConn.InvalidateEntry(parent, name)
+	if err := fs.fuseConn.InvalidateEntry(parent, name); err != nil && err != vfs.ENOENT {
+		glog.Fatalf("Unexpected fuse kernel error on entry invalidation [%T] - %+v", err, err)
+	}
 }
 
 func (fs *fileSystem) StatFS(
@@ -925,10 +929,8 @@ func (fs *fileSystem) FlushFile(
 	ctx context.Context,
 	op *vfs.FlushFileOp) (err error) {
 
-	// jdfs won't buffer writes, fflush can be just nop for JDFS
+	// jdfs won't buffer writes, no need to contact jdfs
 
-	// TODO better to state not implemented explicitly by returning ENOSYS ?
-	// err = vfs.ENOSYS
 	return
 }
 

@@ -5,6 +5,7 @@ import (
 	"io"
 	"sync"
 
+	"github.com/complyue/jdfs/pkg/errors"
 	"github.com/complyue/jdfs/pkg/fuse"
 	"github.com/complyue/jdfs/pkg/vfs"
 )
@@ -42,6 +43,8 @@ func (s *fileSystemServer) handleOp(
 	ctx context.Context,
 	op interface{}) {
 	defer s.opsInFlight.Done()
+
+	var postJob func() error
 
 	// Dispatch to the appropriate method.
 	var err error
@@ -112,6 +115,17 @@ func (s *fileSystemServer) handleOp(
 	case *vfs.FlushFileOp:
 		err = s.fs.FlushFile(ctx, typed)
 
+		postJob = func() error {
+			// FUSE kernel is not smart enough to infer file size increasing from write operations.
+			// we invalidate attrs cache on flush (i.e. handle close), so the kernel knows it needs
+			// to contact jdfs for new file size. if kernel not to update the cached file size,
+			// programs like `git clone` won't work.
+			if err := c.InvalidateNode(typed.Inode, 0, 0); err != nil && err != vfs.ENOENT {
+				return errors.Wrapf(err, "Unexpected fuse kernel error on inode invalidation [%T]", err)
+			}
+			return nil
+		}
+
 	case *vfs.ReleaseFileHandleOp:
 		err = s.fs.ReleaseFileHandle(ctx, typed)
 
@@ -133,10 +147,9 @@ func (s *fileSystemServer) handleOp(
 
 	c.Reply(ctx, err)
 
-	postJob = func() error {
-		// invalidate attrs cache, so the kernel will contact jdfs for new file size
-		fs.InvalidateNode(op.Inode, 0, 0)
-		return nil
+	if postJob != nil {
+		if err = postJob(); err != nil {
+			panic(err)
+		}
 	}
-
 }
