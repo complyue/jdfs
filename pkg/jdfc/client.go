@@ -239,18 +239,18 @@ func (fs *fileSystem) StatFS(
 	op *vfs.StatFSOp) (err error) {
 	co, err := fs.po.NewCo()
 	if err != nil {
-		return err
+		panic(err)
 	}
 	defer co.Close()
 	if err = co.SendCode(`StatFS()`); err != nil {
-		return err
+		panic(err)
 	}
 	if err = co.StartRecv(); err != nil {
-		return err
+		panic(err)
 	}
 	bufView := ((*[unsafe.Sizeof(*op)]byte)(unsafe.Pointer(op)))[0:unsafe.Sizeof(*op)]
 	if err = co.RecvData(bufView); err != nil {
-		return err
+		panic(err)
 	}
 	return
 }
@@ -260,13 +260,13 @@ func (fs *fileSystem) LookUpInode(
 	op *vfs.LookUpInodeOp) (err error) {
 	co, err := fs.po.NewCo()
 	if err != nil {
-		return err
+		panic(err)
 	}
 	defer co.Close()
 	if err = co.SendCode(fmt.Sprintf(`
 LookUpInode(%#v, %#v)
 `, op.Parent, op.Name)); err != nil {
-		return err
+		panic(err)
 	}
 
 	if err = co.StartRecv(); err != nil {
@@ -274,7 +274,7 @@ LookUpInode(%#v, %#v)
 	}
 
 	if fsErr, err := co.RecvObj(); err != nil {
-		return err
+		panic(err)
 	} else if fse, ok := fsErr.(vfs.FsError); !ok {
 		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
 	} else if fse != 0 {
@@ -283,7 +283,7 @@ LookUpInode(%#v, %#v)
 
 	bufView := ((*[unsafe.Sizeof(op.Entry)]byte)(unsafe.Pointer(&op.Entry)))[:unsafe.Sizeof(op.Entry)]
 	if err = co.RecvData(bufView); err != nil {
-		return err
+		panic(err)
 	}
 
 	fs.mapOwner(&op.Entry.Attributes)
@@ -296,14 +296,14 @@ func (fs *fileSystem) GetInodeAttributes(
 	op *vfs.GetInodeAttributesOp) (err error) {
 	co, err := fs.po.NewCo()
 	if err != nil {
-		return err
+		panic(err)
 	}
 	defer co.Close()
 
 	if err = co.SendCode(fmt.Sprintf(`
 GetInodeAttributes(%#v)
 `, op.Inode)); err != nil {
-		return err
+		panic(err)
 	}
 
 	if err = co.StartRecv(); err != nil {
@@ -311,7 +311,7 @@ GetInodeAttributes(%#v)
 	}
 
 	if fsErr, err := co.RecvObj(); err != nil {
-		return err
+		panic(err)
 	} else if fse, ok := fsErr.(vfs.FsError); !ok {
 		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
 	} else if fse != 0 {
@@ -320,7 +320,7 @@ GetInodeAttributes(%#v)
 
 	bufView := ((*[unsafe.Sizeof(op.Attributes)]byte)(unsafe.Pointer(&op.Attributes)))[:unsafe.Sizeof(op.Attributes)]
 	if err = co.RecvData(bufView); err != nil {
-		return err
+		panic(err)
 	}
 
 	fs.mapOwner(&op.Attributes)
@@ -333,7 +333,7 @@ func (fs *fileSystem) SetInodeAttributes(
 	op *vfs.SetInodeAttributesOp) (err error) {
 	co, err := fs.po.NewCo()
 	if err != nil {
-		return err
+		panic(err)
 	}
 	defer co.Close()
 
@@ -359,15 +359,15 @@ SetInodeAttributes(%#v,%#v, %#v, %#v,%#v, %#v, %#v)
 		op.Size != nil, op.Mode != nil, op.Mtime != nil,
 		chgSizeTo, chgModeTo, chgMtimeToNsec,
 	)); err != nil {
-		return err
+		panic(err)
 	}
 
 	if err = co.StartRecv(); err != nil {
-		return err
+		panic(err)
 	}
 
 	if fsErr, err := co.RecvObj(); err != nil {
-		return err
+		panic(err)
 	} else if fse, ok := fsErr.(vfs.FsError); !ok {
 		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
 	} else if fse != 0 {
@@ -376,7 +376,7 @@ SetInodeAttributes(%#v,%#v, %#v, %#v,%#v, %#v, %#v)
 
 	bufView := ((*[unsafe.Sizeof(op.Attributes)]byte)(unsafe.Pointer(&op.Attributes)))[:unsafe.Sizeof(op.Attributes)]
 	if err = co.RecvData(bufView); err != nil {
-		return err
+		panic(err)
 	}
 
 	fs.mapOwner(&op.Attributes)
@@ -389,7 +389,7 @@ func (fs *fileSystem) ForgetInode(
 	op *vfs.ForgetInodeOp) (err error) {
 	co, err := fs.po.NewCo()
 	if err != nil {
-		return err
+		panic(err)
 	}
 	defer co.Close()
 
@@ -407,7 +407,7 @@ func (fs *fileSystem) MkDir(
 	op *vfs.MkDirOp) (err error) {
 	co, err := fs.po.NewCo()
 	if err != nil {
-		return err
+		panic(err)
 	}
 	defer co.Close()
 
@@ -418,11 +418,11 @@ MkDir(%#v, %#v, %#v)
 	}
 
 	if err = co.StartRecv(); err != nil {
-		return err
+		panic(err)
 	}
 
 	if fsErr, err := co.RecvObj(); err != nil {
-		return err
+		panic(err)
 	} else if fse, ok := fsErr.(vfs.FsError); !ok {
 		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
 	} else if fse != 0 {
@@ -431,7 +431,7 @@ MkDir(%#v, %#v, %#v)
 
 	bufView := ((*[unsafe.Sizeof(op.Entry)]byte)(unsafe.Pointer(&op.Entry)))[:unsafe.Sizeof(op.Entry)]
 	if err = co.RecvData(bufView); err != nil {
-		return err
+		panic(err)
 	}
 
 	fs.mapOwner(&op.Entry.Attributes)
@@ -451,7 +451,7 @@ func (fs *fileSystem) CreateFile(
 	op *vfs.CreateFileOp) (err error) {
 	co, err := fs.po.NewCo()
 	if err != nil {
-		return err
+		panic(err)
 	}
 	defer co.Close()
 
@@ -462,11 +462,11 @@ CreateFile(%#v, %#v, %#v)
 	}
 
 	if err = co.StartRecv(); err != nil {
-		return err
+		panic(err)
 	}
 
 	if fsErr, err := co.RecvObj(); err != nil {
-		return err
+		panic(err)
 	} else if fse, ok := fsErr.(vfs.FsError); !ok {
 		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
 	} else if fse != 0 {
@@ -475,7 +475,7 @@ CreateFile(%#v, %#v, %#v)
 
 	handle, err := co.RecvObj()
 	if err != nil {
-		return err
+		panic(err)
 	}
 	if handle, ok := handle.(hbi.LitIntType); !ok {
 		panic(errors.Errorf("unexpected handle type [%T] of handle value [%v]", handle, handle))
@@ -485,7 +485,7 @@ CreateFile(%#v, %#v, %#v)
 
 	bufView := ((*[unsafe.Sizeof(op.Entry)]byte)(unsafe.Pointer(&op.Entry)))[:unsafe.Sizeof(op.Entry)]
 	if err = co.RecvData(bufView); err != nil {
-		return err
+		panic(err)
 	}
 
 	fs.mapOwner(&op.Entry.Attributes)
@@ -498,7 +498,7 @@ func (fs *fileSystem) CreateSymlink(
 	op *vfs.CreateSymlinkOp) (err error) {
 	co, err := fs.po.NewCo()
 	if err != nil {
-		return err
+		panic(err)
 	}
 	defer co.Close()
 
@@ -509,11 +509,11 @@ CreateSymlink(%#v, %#v, %#v)
 	}
 
 	if err = co.StartRecv(); err != nil {
-		return err
+		panic(err)
 	}
 
 	if fsErr, err := co.RecvObj(); err != nil {
-		return err
+		panic(err)
 	} else if fse, ok := fsErr.(vfs.FsError); !ok {
 		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
 	} else if fse != 0 {
@@ -522,7 +522,7 @@ CreateSymlink(%#v, %#v, %#v)
 
 	bufView := ((*[unsafe.Sizeof(op.Entry)]byte)(unsafe.Pointer(&op.Entry)))[:unsafe.Sizeof(op.Entry)]
 	if err = co.RecvData(bufView); err != nil {
-		return err
+		panic(err)
 	}
 
 	fs.mapOwner(&op.Entry.Attributes)
@@ -535,7 +535,7 @@ func (fs *fileSystem) CreateLink(
 	op *vfs.CreateLinkOp) (err error) {
 	co, err := fs.po.NewCo()
 	if err != nil {
-		return err
+		panic(err)
 	}
 	defer co.Close()
 
@@ -546,11 +546,11 @@ CreateLink(%#v, %#v, %#v)
 	}
 
 	if err = co.StartRecv(); err != nil {
-		return err
+		panic(err)
 	}
 
 	if fsErr, err := co.RecvObj(); err != nil {
-		return err
+		panic(err)
 	} else if fse, ok := fsErr.(vfs.FsError); !ok {
 		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
 	} else if fse != 0 {
@@ -559,7 +559,7 @@ CreateLink(%#v, %#v, %#v)
 
 	bufView := ((*[unsafe.Sizeof(op.Entry)]byte)(unsafe.Pointer(&op.Entry)))[:unsafe.Sizeof(op.Entry)]
 	if err = co.RecvData(bufView); err != nil {
-		return err
+		panic(err)
 	}
 
 	fs.mapOwner(&op.Entry.Attributes)
@@ -572,7 +572,7 @@ func (fs *fileSystem) Rename(
 	op *vfs.RenameOp) (err error) {
 	co, err := fs.po.NewCo()
 	if err != nil {
-		return err
+		panic(err)
 	}
 	defer co.Close()
 
@@ -583,11 +583,11 @@ Rename(%#v, %#v, %#v, %#v)
 	}
 
 	if err = co.StartRecv(); err != nil {
-		return err
+		panic(err)
 	}
 
 	if fsErr, err := co.RecvObj(); err != nil {
-		return err
+		panic(err)
 	} else if fse, ok := fsErr.(vfs.FsError); !ok {
 		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
 	} else if fse != 0 {
@@ -602,7 +602,7 @@ func (fs *fileSystem) RmDir(
 	op *vfs.RmDirOp) (err error) {
 	co, err := fs.po.NewCo()
 	if err != nil {
-		return err
+		panic(err)
 	}
 	defer co.Close()
 
@@ -613,11 +613,11 @@ RmDir(%#v, %#v)
 	}
 
 	if err = co.StartRecv(); err != nil {
-		return err
+		panic(err)
 	}
 
 	if fsErr, err := co.RecvObj(); err != nil {
-		return err
+		panic(err)
 	} else if fse, ok := fsErr.(vfs.FsError); !ok {
 		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
 	} else if fse != 0 {
@@ -632,7 +632,7 @@ func (fs *fileSystem) Unlink(
 	op *vfs.UnlinkOp) (err error) {
 	co, err := fs.po.NewCo()
 	if err != nil {
-		return err
+		panic(err)
 	}
 	defer co.Close()
 
@@ -643,11 +643,11 @@ Unlink(%#v, %#v)
 	}
 
 	if err = co.StartRecv(); err != nil {
-		return err
+		panic(err)
 	}
 
 	if fsErr, err := co.RecvObj(); err != nil {
-		return err
+		panic(err)
 	} else if fse, ok := fsErr.(vfs.FsError); !ok {
 		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
 	} else if fse != 0 {
@@ -662,7 +662,7 @@ func (fs *fileSystem) OpenDir(
 	op *vfs.OpenDirOp) (err error) {
 	co, err := fs.po.NewCo()
 	if err != nil {
-		return err
+		panic(err)
 	}
 	defer co.Close()
 
@@ -673,11 +673,11 @@ OpenDir(%#v)
 	}
 
 	if err = co.StartRecv(); err != nil {
-		return err
+		panic(err)
 	}
 
 	if fsErr, err := co.RecvObj(); err != nil {
-		return err
+		panic(err)
 	} else if fse, ok := fsErr.(vfs.FsError); !ok {
 		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
 	} else if fse != 0 {
@@ -686,7 +686,7 @@ OpenDir(%#v)
 
 	handle, err := co.RecvObj()
 	if err != nil {
-		return err
+		panic(err)
 	}
 	if handle, ok := handle.(hbi.LitIntType); !ok {
 		panic(errors.Errorf("unexpected handle type [%T] of handle value [%v]", handle, handle))
@@ -702,7 +702,7 @@ func (fs *fileSystem) ReadDir(
 	op *vfs.ReadDirOp) (err error) {
 	co, err := fs.po.NewCo()
 	if err != nil {
-		return err
+		panic(err)
 	}
 	defer co.Close()
 
@@ -713,11 +713,11 @@ ReadDir(%#v, %#v, %#v, %#v)
 	}
 
 	if err = co.StartRecv(); err != nil {
-		return err
+		panic(err)
 	}
 
 	if fsErr, err := co.RecvObj(); err != nil {
-		return err
+		panic(err)
 	} else if fse, ok := fsErr.(vfs.FsError); !ok {
 		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
 	} else if fse != 0 {
@@ -726,7 +726,7 @@ ReadDir(%#v, %#v, %#v, %#v)
 
 	bytesRead, err := co.RecvObj()
 	if err != nil {
-		return err
+		panic(err)
 	}
 	if bytesRead, ok := bytesRead.(hbi.LitIntType); !ok {
 		panic(errors.Errorf("unexpected bytesRead type [%T] of bytesRead value [%v]", bytesRead, bytesRead))
@@ -735,7 +735,7 @@ ReadDir(%#v, %#v, %#v, %#v)
 	}
 	if op.BytesRead > 0 {
 		if err = co.RecvData(op.Dst[:op.BytesRead]); err != nil {
-			return err
+			panic(err)
 		}
 	}
 
@@ -747,7 +747,7 @@ func (fs *fileSystem) ReleaseDirHandle(
 	op *vfs.ReleaseDirHandleOp) (err error) {
 	co, err := fs.po.NewCo()
 	if err != nil {
-		return err
+		panic(err)
 	}
 	defer co.Close()
 
@@ -765,7 +765,7 @@ func (fs *fileSystem) OpenFile(
 	op *vfs.OpenFileOp) (err error) {
 	co, err := fs.po.NewCo()
 	if err != nil {
-		return err
+		panic(err)
 	}
 	defer co.Close()
 
@@ -781,11 +781,11 @@ OpenFile(%#v, %#v)
 	}
 
 	if err = co.StartRecv(); err != nil {
-		return err
+		panic(err)
 	}
 
 	if fsErr, err := co.RecvObj(); err != nil {
-		return err
+		panic(err)
 	} else if fse, ok := fsErr.(vfs.FsError); !ok {
 		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
 	} else if fse != 0 {
@@ -794,7 +794,7 @@ OpenFile(%#v, %#v)
 
 	handle, err := co.RecvObj()
 	if err != nil {
-		return err
+		panic(err)
 	}
 	if handle, ok := handle.(hbi.LitIntType); !ok {
 		panic(errors.Errorf("unexpected handle type [%T] of handle value [%v]", handle, handle))
@@ -810,7 +810,7 @@ func (fs *fileSystem) ReadFile(
 	op *vfs.ReadFileOp) (err error) {
 	co, err := fs.po.NewCo()
 	if err != nil {
-		return err
+		panic(err)
 	}
 	defer co.Close()
 
@@ -821,11 +821,11 @@ ReadFile(%#v, %#v, %#v, %#v)
 	}
 
 	if err = co.StartRecv(); err != nil {
-		return err
+		panic(err)
 	}
 
 	if fsErr, err := co.RecvObj(); err != nil {
-		return err
+		panic(err)
 	} else if fse, ok := fsErr.(vfs.FsError); !ok {
 		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
 	} else if fse != 0 {
@@ -834,7 +834,7 @@ ReadFile(%#v, %#v, %#v, %#v)
 
 	bytesRead, err := co.RecvObj()
 	if err != nil {
-		return err
+		panic(err)
 	}
 	if bytesRead, ok := bytesRead.(hbi.LitIntType); !ok {
 		panic(errors.Errorf("unexpected bytesRead type [%T] of bytesRead value [%v]", bytesRead, bytesRead))
@@ -844,12 +844,12 @@ ReadFile(%#v, %#v, %#v, %#v)
 
 	eof, err := co.RecvObj()
 	if err != nil {
-		return err
+		panic(err)
 	}
 
 	if op.BytesRead > 0 {
 		if err = co.RecvData(op.Dst[:op.BytesRead]); err != nil {
-			return err
+			panic(err)
 		}
 	}
 
@@ -867,7 +867,7 @@ func (fs *fileSystem) WriteFile(
 	op *vfs.WriteFileOp) (err error) {
 	co, err := fs.po.NewCo()
 	if err != nil {
-		return err
+		panic(err)
 	}
 	defer co.Close()
 
@@ -877,15 +877,15 @@ WriteFile(%#v, %#v, %#v, %#v)
 		panic(err)
 	}
 	if err = co.SendData(op.Data); err != nil {
-		return err
+		panic(err)
 	}
 
 	if err = co.StartRecv(); err != nil {
-		return err
+		panic(err)
 	}
 
 	if fsErr, err := co.RecvObj(); err != nil {
-		return err
+		panic(err)
 	} else if fse, ok := fsErr.(vfs.FsError); !ok {
 		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
 	} else if fse != 0 {
@@ -900,7 +900,7 @@ func (fs *fileSystem) SyncFile(
 	op *vfs.SyncFileOp) (err error) {
 	co, err := fs.po.NewCo()
 	if err != nil {
-		return err
+		panic(err)
 	}
 	defer co.Close()
 
@@ -911,11 +911,11 @@ SyncFile(%#v, %#v)
 	}
 
 	if err = co.StartRecv(); err != nil {
-		return err
+		panic(err)
 	}
 
 	if fsErr, err := co.RecvObj(); err != nil {
-		return err
+		panic(err)
 	} else if fse, ok := fsErr.(vfs.FsError); !ok {
 		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
 	} else if fse != 0 {
@@ -939,7 +939,7 @@ func (fs *fileSystem) ReleaseFileHandle(
 	op *vfs.ReleaseFileHandleOp) (err error) {
 	co, err := fs.po.NewCo()
 	if err != nil {
-		return err
+		panic(err)
 	}
 	defer co.Close()
 
@@ -957,7 +957,7 @@ func (fs *fileSystem) ReadSymlink(
 	op *vfs.ReadSymlinkOp) (err error) {
 	co, err := fs.po.NewCo()
 	if err != nil {
-		return err
+		panic(err)
 	}
 	defer co.Close()
 
@@ -968,11 +968,11 @@ ReadSymlink(%#v)
 	}
 
 	if err = co.StartRecv(); err != nil {
-		return err
+		panic(err)
 	}
 
 	if fsErr, err := co.RecvObj(); err != nil {
-		return err
+		panic(err)
 	} else if fse, ok := fsErr.(vfs.FsError); !ok {
 		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
 	} else if fse != 0 {
@@ -981,7 +981,7 @@ ReadSymlink(%#v)
 
 	target, err := co.RecvObj()
 	if err != nil {
-		return err
+		panic(err)
 	}
 	if target, ok := target.(string); !ok {
 		panic(errors.Errorf("unexpected target type [%T] of target value [%v]", target, target))
