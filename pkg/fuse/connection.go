@@ -24,12 +24,14 @@ import (
 	"runtime"
 	"sync"
 	"syscall"
+	"unsafe"
 
 	// vfs was separated from this package (fuse) to be dependable by jdfs while
 	// still buildable for smartos (a.k.a. illumos, solaris), as fuse only support
 	// linux and osx (a.k.a. darwin) atm.
 	// import all artifacts back here to minimize changes in this package for the
 	// separation.
+	"github.com/complyue/jdfs/pkg/vfs"
 	. "github.com/complyue/jdfs/pkg/vfs"
 )
 
@@ -507,4 +509,56 @@ func (c *Connection) close() (err error) {
 	// user to respond to all ops first.
 	err = c.dev.Close()
 	return
+}
+
+// InvalidateNode invalidates the kernel cache of the attributes and a
+// range of the data of a node.
+//
+// Giving offset 0 and size -1 means all data. To invalidate just the
+// attributes, give offset 0 and size 0.
+//
+// Returns ENOENT if the kernel is not currently caching the
+// node.
+func (c *Connection) InvalidateNode(nodeID vfs.InodeID, off int64, size int64) error {
+	outMsg := c.getOutMessage()
+	defer c.putOutMessage(outMsg)
+
+	outSize := int(unsafe.Sizeof(NotifyInvalInodeOut{}))
+	out := (*NotifyInvalInodeOut)(outMsg.Grow(outSize))
+	// header Unique is 0
+	outMsg.header.Error = NotifyCodeInvalInode
+	out.Ino = uint64(nodeID)
+	out.Off = off
+	out.Len = size
+	return c.writeMessage(outMsg.Bytes())
+}
+
+// InvalidateEntry invalidates the kernel cache of the directory entry
+// identified by parent directory node ID and entry basename.
+//
+// Kernel may or may not cache directory listings. To invalidate
+// those, use InvalidateNode to invalidate all of the data for a
+// directory. (As of 2015-06, Linux FUSE does not cache directory
+// listings.)
+//
+// Returns ENOENT if the kernel is not currently caching the
+// node.
+func (c *Connection) InvalidateEntry(parent vfs.InodeID, name string) error {
+	const maxUint32 = ^uint32(0)
+	if uint64(len(name)) > uint64(maxUint32) {
+		// very unlikely, but we don't want to silently truncate
+		return syscall.ENAMETOOLONG
+	}
+
+	outMsg := c.getOutMessage()
+	defer c.putOutMessage()
+
+	outSize := int(unsafe.Sizeof(NotifyInvalEntryOut{}))
+	out := (*NotifyInvalEntryOut)(outMsg.Grow(outSize))
+	// header Unique is 0
+	outMsg.header.Error = NotifyCodeInvalEntry
+	out.Parent = uint64(parent)
+	out.Namelen = uint32(len(name))
+	outMsg.AppendString(name)
+	return c.writeMessage(outMsg.Bytes())
 }
