@@ -32,6 +32,8 @@ func newServiceEnv(exportRoot string) *hbi.HostingEnv {
 	he.ExposeValue("ENOSYS", vfs.ENOSYS)
 	he.ExposeValue("ENOTDIR", vfs.ENOTDIR)
 	he.ExposeValue("ENOTEMPTY", vfs.ENOTEMPTY)
+	he.ExposeValue("ERANGE", vfs.ERANGE)
+	he.ExposeValue("ENOSPC", vfs.ENOSPC)
 	he.ExposeValue("ENOATTR", vfs.ENOATTR)
 
 	he.ExposeFunction("__hbi_init__", // callback on wire connected
@@ -83,7 +85,7 @@ func (efs *exportedFileSystem) NamesToExpose() []string {
 		"Mount", "StatFS", "LookUpInode", "GetInodeAttributes", "SetInodeAttributes", "ForgetInode",
 		"MkDir", "CreateFile", "CreateSymlink", "CreateLink", "Rename", "RmDir", "Unlink",
 		"OpenDir", "ReadDir", "ReleaseDirHandle", "OpenFile", "ReadFile", "WriteFile", "SyncFile",
-		"ReleaseFileHandle", "ReadSymlink",
+		"ReleaseFileHandle", "ReadSymlink", "RemoveXattr", "GetXattr", "ListXattr", "SetXattr",
 	}
 }
 
@@ -1366,5 +1368,249 @@ func (efs *exportedFileSystem) ReadSymlink(inode vfs.InodeID) {
 
 	if err := co.SendObj(hbi.Repr(target)); err != nil {
 		panic(err)
+	}
+}
+
+func (efs *exportedFileSystem) RemoveXattr(inode vfs.InodeID, name string) {
+	co := efs.ho.Co()
+
+	if err := co.FinishRecv(); err != nil {
+		panic(err)
+	}
+
+	fsErr := func() (err error) {
+		ici, ok := efs.icd.GetInode(0, inode)
+		if !ok {
+			err = vfs.ENOENT
+			return
+		}
+		inoM, outdatedPaths, e := statInode(ici.inode, ici.reachedThrough)
+		if e != nil {
+			err = e
+			return
+		}
+		if ici, ok = efs.icd.LoadInode(0, inoM, outdatedPaths, nil, time.Now()); !ok {
+			err = e
+			return
+		}
+
+		jdfPath := inoM.jdfPath
+
+		if err = removexattr(jdfPath, name); err != nil {
+			return
+		}
+
+		if glog.V(2) {
+			glog.Infof("Removed xattr [%s] from [%d] [%s]:[%s]", name, inoM.inode, jdfsRootPath, jdfPath)
+		}
+
+		return
+	}()
+
+	if err := co.StartSend(); err != nil {
+		panic(err)
+	}
+
+	fse := vfs.FsErr(fsErr)
+	if err := co.SendObj(fse.Repr()); err != nil {
+		panic(err)
+	}
+	if fse != 0 {
+		return
+	}
+}
+
+func (efs *exportedFileSystem) GetXattr(inode vfs.InodeID, name string, bufSz int) {
+	co := efs.ho.Co()
+
+	if err := co.FinishRecv(); err != nil {
+		panic(err)
+	}
+
+	var buf []byte
+	if bufSz > 0 {
+		buf = efs.bufPool.Get(bufSz)
+		defer efs.bufPool.Return(buf)
+	} else {
+		buf = []byte{}
+	}
+
+	var bytesRead int
+	var fsErr error
+	func() {
+		ici, ok := efs.icd.GetInode(0, inode)
+		if !ok {
+			fsErr = vfs.ENOENT
+			return
+		}
+		inoM, outdatedPaths, e := statInode(ici.inode, ici.reachedThrough)
+		if e != nil {
+			fsErr = e
+			return
+		}
+		if ici, ok = efs.icd.LoadInode(0, inoM, outdatedPaths, nil, time.Now()); !ok {
+			fsErr = e
+			return
+		}
+
+		jdfPath := inoM.jdfPath
+
+		bytesRead, fsErr = getxattr(jdfPath, name, buf)
+		if fsErr != nil {
+			return
+		}
+
+		if glog.V(2) {
+			glog.Infof("Read xattr [%s]=[%s] %d#>%d for file [%d] [%s]:[%s]", name, string(buf),
+				bufSz, bytesRead, inoM.inode, jdfsRootPath, jdfPath)
+		}
+	}()
+
+	if err := co.StartSend(); err != nil {
+		panic(err)
+	}
+
+	fse := vfs.FsErr(fsErr)
+	if err := co.SendObj(fse.Repr()); err != nil {
+		panic(err)
+	}
+	if fse != 0 && fse != vfs.ERANGE {
+		return
+	}
+
+	if err := co.SendObj(hbi.Repr(bytesRead)); err != nil {
+		panic(err)
+	}
+
+	if 0 < bytesRead && bytesRead <= bufSz {
+		if err := co.SendData(buf[:bytesRead]); err != nil {
+			panic(err)
+		}
+	}
+}
+
+func (efs *exportedFileSystem) ListXattr(inode vfs.InodeID, bufSz int) {
+	co := efs.ho.Co()
+
+	if err := co.FinishRecv(); err != nil {
+		panic(err)
+	}
+
+	var buf []byte
+	if bufSz > 0 {
+		buf = efs.bufPool.Get(bufSz)
+		defer efs.bufPool.Return(buf)
+	} else {
+		buf = []byte{}
+	}
+
+	var bytesRead int
+	var fsErr error
+	func() {
+		ici, ok := efs.icd.GetInode(0, inode)
+		if !ok {
+			fsErr = vfs.ENOENT
+			return
+		}
+		inoM, outdatedPaths, e := statInode(ici.inode, ici.reachedThrough)
+		if e != nil {
+			fsErr = e
+			return
+		}
+		if ici, ok = efs.icd.LoadInode(0, inoM, outdatedPaths, nil, time.Now()); !ok {
+			fsErr = e
+			return
+		}
+
+		jdfPath := inoM.jdfPath
+
+		bytesRead, fsErr = listxattr(jdfPath, buf)
+		if fsErr != nil && fsErr != syscall.ERANGE {
+			return
+		}
+
+		if glog.V(2) {
+			glog.Infof("Listed xattr %d=>%d bytes for file [%d] [%s]:[%s]",
+				bufSz, bytesRead, inoM.inode, jdfsRootPath, jdfPath)
+		}
+	}()
+
+	if err := co.StartSend(); err != nil {
+		panic(err)
+	}
+
+	fse := vfs.FsErr(fsErr)
+	if err := co.SendObj(fse.Repr()); err != nil {
+		panic(err)
+	}
+	if fse != 0 && fse != vfs.ERANGE {
+		return
+	}
+
+	if err := co.SendObj(hbi.Repr(bytesRead)); err != nil {
+		panic(err)
+	}
+
+	if 0 < bytesRead && bytesRead <= bufSz {
+		if err := co.SendData(buf[:bytesRead]); err != nil {
+			panic(err)
+		}
+	}
+}
+
+func (efs *exportedFileSystem) SetXattr(inode vfs.InodeID, name string, valSz int, flags int) {
+	co := efs.ho.Co()
+
+	buf := efs.bufPool.Get(valSz)
+	defer efs.bufPool.Return(buf)
+
+	if err := co.RecvData(buf); err != nil {
+		panic(err)
+	}
+
+	if err := co.FinishRecv(); err != nil {
+		panic(err)
+	}
+
+	fsErr := func() (err error) {
+		ici, ok := efs.icd.GetInode(0, inode)
+		if !ok {
+			err = vfs.ENOENT
+			return
+		}
+		inoM, outdatedPaths, e := statInode(ici.inode, ici.reachedThrough)
+		if e != nil {
+			err = e
+			return
+		}
+		if ici, ok = efs.icd.LoadInode(0, inoM, outdatedPaths, nil, time.Now()); !ok {
+			err = e
+			return
+		}
+
+		jdfPath := inoM.jdfPath
+
+		if err = setxattr(jdfPath, name, buf, flags); err != nil {
+			return
+		}
+
+		if glog.V(2) {
+			glog.Infof("Updated xattr [%s]=[%s] of [%d] [%s]:[%s]", name, buf,
+				inoM.inode, jdfsRootPath, jdfPath)
+		}
+
+		return
+	}()
+
+	if err := co.StartSend(); err != nil {
+		panic(err)
+	}
+
+	fse := vfs.FsErr(fsErr)
+	if err := co.SendObj(fse.Repr()); err != nil {
+		panic(err)
+	}
+	if fse != 0 {
+		return
 	}
 }

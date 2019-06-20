@@ -44,6 +44,8 @@ const (
 	ENOSYS    = FsError(syscall.ENOSYS)
 	ENOTDIR   = FsError(syscall.ENOTDIR)
 	ENOTEMPTY = FsError(syscall.ENOTEMPTY)
+	ERANGE    = FsError(syscall.ERANGE)
+	ENOSPC    = FsError(syscall.ENOSPC)
 
 	// ENOATTR and/or ENODATA diverse greatly among OSes,
 	// using ENODATA for ENOATTR should work for Linux/macOS/Solaris(SmartOS),
@@ -76,6 +78,10 @@ func (fse FsError) Repr() string {
 		return "ENOTDIR"
 	case ENOTEMPTY:
 		return "ENOTEMPTY"
+	case ERANGE:
+		return "ERANGE"
+	case ENOSPC:
+		return "ENOSPC"
 	case ENOATTR:
 		return "ENOATTR"
 	}

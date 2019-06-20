@@ -71,6 +71,8 @@ func MountJDFS(
 	he.ExposeValue("ENOSYS", vfs.ENOSYS)
 	he.ExposeValue("ENOTDIR", vfs.ENOTDIR)
 	he.ExposeValue("ENOTEMPTY", vfs.ENOTEMPTY)
+	he.ExposeValue("ERANGE", vfs.ERANGE)
+	he.ExposeValue("ENOSPC", vfs.ENOSPC)
 	he.ExposeValue("ENOATTR", vfs.ENOATTR)
 	// expose fs as the reactor
 	he.ExposeReactor(fs)
@@ -995,21 +997,124 @@ ReadSymlink(%#v)
 func (fs *fileSystem) RemoveXattr(
 	ctx context.Context,
 	op *vfs.RemoveXattrOp) (err error) {
-	err = vfs.ENOATTR
+	co, err := fs.po.NewCo()
+	if err != nil {
+		panic(err)
+	}
+	defer co.Close()
+
+	if err = co.SendCode(fmt.Sprintf(`
+RemoveXattr(%#v, %#v)
+`, op.Inode, op.Name)); err != nil {
+		panic(err)
+	}
+
+	if err = co.StartRecv(); err != nil {
+		panic(err)
+	}
+
+	if fsErr, err := co.RecvObj(); err != nil {
+		panic(err)
+	} else if fse, ok := fsErr.(vfs.FsError); !ok {
+		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
+	} else if fse != 0 {
+		return syscall.Errno(fse)
+	}
+
 	return
 }
 
 func (fs *fileSystem) GetXattr(
 	ctx context.Context,
 	op *vfs.GetXattrOp) (err error) {
-	err = vfs.ENOATTR
+	co, err := fs.po.NewCo()
+	if err != nil {
+		panic(err)
+	}
+	defer co.Close()
+
+	if err = co.SendCode(fmt.Sprintf(`
+GetXattr(%#v, %#v, %#v)
+`, op.Inode, op.Name, len(op.Dst))); err != nil {
+		panic(err)
+	}
+
+	if err = co.StartRecv(); err != nil {
+		panic(err)
+	}
+
+	if fsErr, err := co.RecvObj(); err != nil {
+		panic(err)
+	} else if fse, ok := fsErr.(vfs.FsError); !ok {
+		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
+	} else if fse != 0 && fse != vfs.ERANGE {
+		return syscall.Errno(fse)
+	}
+
+	bytesRead, err := co.RecvObj()
+	if err != nil {
+		panic(err)
+	}
+	if bytesRead, ok := bytesRead.(hbi.LitIntType); !ok {
+		panic(errors.Errorf("unexpected bytesRead type [%T] of bytesRead value [%v]", bytesRead, bytesRead))
+	} else {
+		op.BytesRead = int(bytesRead)
+		if op.BytesRead <= len(op.Dst) {
+			if err = co.RecvData(op.Dst[:bytesRead]); err != nil {
+				panic(err)
+			}
+		} else {
+			return syscall.ERANGE
+		}
+	}
+
 	return
 }
 
 func (fs *fileSystem) ListXattr(
 	ctx context.Context,
 	op *vfs.ListXattrOp) (err error) {
-	// leave the op as-is, to carry zero data to return
+	co, err := fs.po.NewCo()
+	if err != nil {
+		panic(err)
+	}
+	defer co.Close()
+
+	if err = co.SendCode(fmt.Sprintf(`
+ListXattr(%#v, %#v)
+`, op.Inode, len(op.Dst))); err != nil {
+		panic(err)
+	}
+
+	if err = co.StartRecv(); err != nil {
+		panic(err)
+	}
+
+	if fsErr, err := co.RecvObj(); err != nil {
+		panic(err)
+	} else if fse, ok := fsErr.(vfs.FsError); !ok {
+		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
+	} else if fse != 0 && fse != vfs.ERANGE {
+		return syscall.Errno(fse)
+	}
+
+	bytesRead, err := co.RecvObj()
+	if err != nil {
+		panic(err)
+	}
+	if bytesRead, ok := bytesRead.(hbi.LitIntType); !ok {
+		panic(errors.Errorf("unexpected bytesRead type [%T] of bytesRead value [%v]", bytesRead, bytesRead))
+	} else {
+		op.BytesRead = int(bytesRead)
+		if op.BytesRead <= len(op.Dst) {
+			if err = co.RecvData(op.Dst[:bytesRead]); err != nil {
+				panic(err)
+			}
+		} else {
+			return syscall.ERANGE
+		}
+	}
+
 	return
 }
 
@@ -1018,6 +1123,33 @@ func (fs *fileSystem) SetXattr(
 	op *vfs.SetXattrOp) (err error) {
 	// allow no space consumption
 	err = syscall.ENOSPC
+	co, err := fs.po.NewCo()
+	if err != nil {
+		panic(err)
+	}
+	defer co.Close()
+
+	if err = co.SendCode(fmt.Sprintf(`
+SetXattr(%#v, %#v, %#v, %#v)
+`, op.Inode, op.Name, len(op.Value), op.Flags)); err != nil {
+		panic(err)
+	}
+	if err = co.SendData(op.Value); err != nil {
+		panic(err)
+	}
+
+	if err = co.StartRecv(); err != nil {
+		panic(err)
+	}
+
+	if fsErr, err := co.RecvObj(); err != nil {
+		panic(err)
+	} else if fse, ok := fsErr.(vfs.FsError); !ok {
+		panic(errors.Errorf("Unexpected fs error from jdfs with type [%T] - %+v", fsErr, fsErr))
+	} else if fse != 0 {
+		return syscall.Errno(fse)
+	}
+
 	return
 }
 

@@ -57,3 +57,24 @@ func chftimes(f *os.File, jdfPath string, nsec int64) error {
 		t, t,
 	})
 }
+
+// Solaris seems using file semantics for xattr,
+// and Go stdlib has no support for it yet.
+//
+// TODO add the support when Go does or a proper Go lib found
+
+func removexattr(jdfPath, name string) error {
+	return vfs.ENOATTR
+}
+
+func getxattr(jdfPath, name string, buf []byte) (int, error) {
+	return 0, vfs.ENOATTR
+}
+
+func listxattr(jdfPath string, buf []byte) (int, error) {
+	return 0, nil
+}
+
+func setxattr(jdfPath, name string, buf []byte, flags int) error {
+	return vfs.ENOSPC
+}

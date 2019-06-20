@@ -6,6 +6,8 @@ import (
 
 	"github.com/complyue/jdfs/pkg/errors"
 	"github.com/complyue/jdfs/pkg/vfs"
+
+	"golang.org/x/sys/unix"
 )
 
 func statFS(rootDir *os.File) (op vfs.StatFSOp, err error) {
@@ -54,4 +56,20 @@ func chftimes(f *os.File, jdfPath string, nsec int64) error {
 	return syscall.Futimes(int(f.Fd()), []syscall.Timeval{
 		t, t,
 	})
+}
+
+func removexattr(jdfPath, name string) error {
+	return unix.Removexattr(jdfPath, name)
+}
+
+func getxattr(jdfPath, name string, buf []byte) (int, error) {
+	return unix.Getxattr(jdfPath, name, buf)
+}
+
+func listxattr(jdfPath string, buf []byte) (int, error) {
+	return unix.Llistxattr(jdfPath, buf)
+}
+
+func setxattr(jdfPath, name string, buf []byte, flags int) error {
+	return unix.Setxattr(jdfPath, name, buf, flags)
 }

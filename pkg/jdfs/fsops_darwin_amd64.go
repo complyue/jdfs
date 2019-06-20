@@ -6,6 +6,8 @@ import (
 
 	"github.com/complyue/jdfs/pkg/errors"
 	"github.com/complyue/jdfs/pkg/vfs"
+
+	"golang.org/x/sys/unix"
 )
 
 func statFS(rootDir *os.File) (op vfs.StatFSOp, err error) {
@@ -53,4 +55,44 @@ func chftimes(f *os.File, jdfPath string, nsec int64) error {
 	return syscall.Futimes(int(f.Fd()), []syscall.Timeval{
 		t, t,
 	})
+}
+
+func removexattr(jdfPath, name string) error {
+	err := unix.Removexattr(jdfPath, name)
+	switch err {
+	case syscall.ENOATTR: // macOS has real ENOATTR,
+		// vfs uses ENODATA for compatibility with Linux
+		err = vfs.ENOATTR
+	}
+	return err
+}
+
+func getxattr(jdfPath, name string, buf []byte) (int, error) {
+	n, err := unix.Getxattr(jdfPath, name, buf)
+	switch err {
+	case syscall.ENOATTR: // macOS has real ENOATTR,
+		// vfs uses ENODATA for compatibility with Linux
+		err = vfs.ENOATTR
+	}
+	return n, err
+}
+
+func listxattr(jdfPath string, buf []byte) (int, error) {
+	n, err := unix.Llistxattr(jdfPath, buf)
+	switch err {
+	case syscall.ENOATTR: // macOS has real ENOATTR,
+		// vfs uses ENODATA for compatibility with Linux
+		err = vfs.ENOATTR
+	}
+	return n, err
+}
+
+func setxattr(jdfPath, name string, buf []byte, flags int) error {
+	err := unix.Setxattr(jdfPath, name, buf, flags)
+	switch err {
+	case syscall.ENOATTR: // macOS has real ENOATTR,
+		// vfs uses ENODATA for compatibility with Linux
+		err = vfs.ENOATTR
+	}
+	return err
 }
