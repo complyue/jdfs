@@ -111,7 +111,7 @@ func MountJDFS(
 		return err
 	}
 
-	mfs, err := fuse.Mount(mountpoint, &fileSystemServer{fs: fs}, cfg)
+	mfs, fuseConn, err := fuse.Mount(mountpoint, &fileSystemServer{fs: fs}, cfg)
 	if err != nil {
 		return err
 	}
@@ -120,6 +120,12 @@ func MountJDFS(
 		err = errors.Errorf("FUSE kernel version %v not supported", p)
 		return
 	}
+	func() {
+		fs.mu.Lock()
+		defer fs.mu.Unlock()
+
+		fs.fuseConn = fuseConn
+	}()
 
 	fmt.Fprintf(os.Stderr, "JDFS client mounted [%s] on [%s]\n",
 		cfg.FSName, mountpoint)
@@ -139,6 +145,8 @@ type fileSystem struct {
 
 	mu sync.Mutex
 
+	fuseConn *fuse.Connection
+
 	po *hbi.PostingEnd
 	ho *hbi.HostingEnd
 
@@ -147,8 +155,8 @@ type fileSystem struct {
 
 func (fs *fileSystem) NamesToExpose() []string {
 	return []string{
-		"InvalidateFileContent",
-		"InvalidateDirEntry",
+		"InvalidateNode",
+		"InvalidateEntry",
 	}
 }
 
@@ -166,8 +174,6 @@ func (fs *fileSystem) connReset(
 ) {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
-
-	// TODO reset cache, mark all open files stale
 
 	fs.po, fs.ho = po, ho
 	if err := func() (err error) {
@@ -212,14 +218,16 @@ Mount(%#v, %#v)
 	}
 }
 
-func (fs *fileSystem) InvalidateFileContent(
+func (fs *fileSystem) InvalidateNode(
 	inode vfs.InodeID, offset, size int64,
 ) {
+	fs.fuseConn.InvalidateNode(inode, offset, size)
 }
 
-func (fs *fileSystem) InvalidateDirEntry(
-	dir, inode vfs.InodeID, name string,
+func (fs *fileSystem) InvalidateEntry(
+	parent vfs.InodeID, name string,
 ) {
+	fs.fuseConn.InvalidateEntry(parent, name)
 }
 
 func (fs *fileSystem) StatFS(

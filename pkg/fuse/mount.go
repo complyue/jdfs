@@ -35,21 +35,21 @@ type Server interface {
 func Mount(
 	dir string,
 	server Server,
-	config *MountConfig) (*MountedFileSystem, error) {
+	config *MountConfig) (*MountedFileSystem, *Connection, error) {
 	// Sanity check: make sure the mount point exists and is a directory. This
 	// saves us from some confusing errors later on OS X.
 	fi, err := os.Stat(dir)
 	switch {
 	case os.IsNotExist(err):
-		return nil, err
+		return nil, nil, err
 
 	case err != nil:
 		err = fmt.Errorf("Statting mount point: %v", err)
-		return nil, err
+		return nil, nil, err
 
 	case !fi.IsDir():
 		err = fmt.Errorf("Mount point %s is not a directory", dir)
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Initialize the struct.
@@ -63,7 +63,7 @@ func Mount(
 	dev, err := mount(dir, config, ready)
 	if err != nil {
 		err = fmt.Errorf("mount: %v", err)
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Choose a parent context for ops.
@@ -81,7 +81,7 @@ func Mount(
 
 	if err != nil {
 		err = fmt.Errorf("newConnection: %v", err)
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Serve the connection in the background. When done, set the join status.
@@ -94,11 +94,11 @@ func Mount(
 	// Wait for the mount process to complete.
 	if err = <-ready; err != nil {
 		err = fmt.Errorf("mount (background): %v", err)
-		return nil, err
+		return nil, nil, err
 	}
 
 	// protocol is set during Init op, stays zero valued before ready
 	mfs.protocol = connection.protocol
 
-	return mfs, nil
+	return mfs, connection, nil
 }

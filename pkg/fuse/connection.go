@@ -551,7 +551,7 @@ func (c *Connection) InvalidateEntry(parent vfs.InodeID, name string) error {
 	}
 
 	outMsg := c.getOutMessage()
-	defer c.putOutMessage()
+	defer c.putOutMessage(outMsg)
 
 	outSize := int(unsafe.Sizeof(NotifyInvalEntryOut{}))
 	out := (*NotifyInvalEntryOut)(outMsg.Grow(outSize))
