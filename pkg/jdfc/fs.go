@@ -33,15 +33,7 @@ func (s *fileSystemServer) ServeOps(c *fuse.Connection) {
 		}
 
 		s.opsInFlight.Add(1)
-		if _, ok := op.(*vfs.ForgetInodeOp); ok {
-			// Special case: call in this goroutine for
-			// forget inode ops, which may come in a
-			// flurry from the kernel and are generally
-			// cheap for the file system to handle
-			s.handleOp(c, ctx, op)
-		} else {
-			go s.handleOp(c, ctx, op)
-		}
+		go s.handleOp(c, ctx, op)
 	}
 }
 
@@ -140,4 +132,11 @@ func (s *fileSystemServer) handleOp(
 	}
 
 	c.Reply(ctx, err)
+
+	postJob = func() error {
+		// invalidate attrs cache, so the kernel will contact jdfs for new file size
+		fs.InvalidateNode(op.Inode, 0, 0)
+		return nil
+	}
+
 }
