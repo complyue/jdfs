@@ -127,8 +127,8 @@ func MountJDFS(
 		fs.fuseConn = fuseConn
 	}()
 
-	fmt.Fprintf(os.Stderr, "JDFS client mounted [%s] on [%s]\n",
-		cfg.FSName, mountpoint)
+	fmt.Fprintf(os.Stderr, "JDFS client %d mounted [%s] on [%s]\n",
+		os.Getpid(), cfg.FSName, mountpoint)
 
 	if err = mfs.Join(context.Background()); err != nil {
 		return err
