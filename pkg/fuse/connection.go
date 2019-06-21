@@ -487,7 +487,7 @@ func (c *Connection) Reply(ctx context.Context, opErr error) {
 
 	// Error logging
 	if c.shouldLogError(op, opErr) {
-		c.errorLogger.Printf("%T error: %v", op, opErr)
+		c.errorLogger.Printf("%T error: %+v\n * %+v", op, opErr, op)
 	}
 
 	// Send the reply to the kernel, if one is required.
