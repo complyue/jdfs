@@ -27,6 +27,19 @@ func (im iMeta) childPath(name string) string {
 	}
 }
 
+func statFileHandle(icfh *icfHandle) (inoM iMeta, err error) {
+	var inoFI os.FileInfo
+	if inoFI, err = icfh.f.Stat(); err != nil {
+		glog.Fatalf("stat error through open file handle - %+v", err)
+	}
+	if im := fi2im(icfh.f.Name(), inoFI); im.inode != icfh.inode {
+		glog.Fatalf("inode changed with open file handle ?!")
+	} else {
+		inoM = im
+	}
+	return
+}
+
 func statInode(inode vfs.InodeID, reachedThrough []string) (
 	inoM iMeta, outdatedPaths []string, err error) {
 	ok := false
@@ -92,19 +105,12 @@ func statInode(inode vfs.InodeID, reachedThrough []string) (
 	return
 }
 
-func readInodeDir(parentInode vfs.InodeID, reachedThrough []string) (
-	parentM iMeta, childMs []iMeta, outdatedPaths []string, err error) {
+func readInodeDir(parentM iMeta) (childMs []iMeta, err error) {
 	var (
 		parentDir *os.File
 		childFIs  []os.FileInfo
 		childM    iMeta
 	)
-
-	if parentM, outdatedPaths, err = statInode(
-		parentInode, reachedThrough,
-	); err != nil {
-		return
-	}
 
 	parentPath := parentM.jdfPath
 	parentDir, err = os.OpenFile(parentPath, os.O_RDONLY, 0)

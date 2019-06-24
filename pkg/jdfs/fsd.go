@@ -59,6 +59,9 @@ type icInode struct {
 	// jdf paths through which this inode has been reached
 	reachedThrough []string
 
+	// head of the file handle list
+	fhHead int
+
 	// last time at which attrs/children are refreshed
 	lastChecked         time.Time
 	lastChildrenChecked time.Time
@@ -87,7 +90,20 @@ type icdHandle struct {
 type icfHandle struct {
 	isi int
 
+	// this should be consistent with what isi points to,
+	// redundant for fast value without locking mu, in logging etc.
 	inode vfs.InodeID
+
+	// the double-link pointers.
+	//
+	// file handles on a same inode form a doublely linked list, a underlying file may get unlinked
+	// before all handles to it be closed, in this case stating local fs will see the file disappeared,
+	// but the jdfc may still want to get file size or perform other operations with this file
+	// through its inode as remembered in the FUSE kernel, such operations should be performed at
+	// jdfs via the opened fd instead of consulting underlying local fs's namespace.
+	//
+	// if prefFH is 0, this handle is the head of the list
+	prevFH, nextFH int
 
 	// f will be kept open until the handle closed
 	f *os.File
@@ -357,8 +373,15 @@ func (icd *icFSD) getInode(inode vfs.InodeID) *icInode {
 	return ici
 }
 
-// GetInode returns a snapshot of in-core inode record
-func (icd *icFSD) GetInode(incRef int, inode vfs.InodeID) (ici icInode, ok bool) {
+// GetInode returns a snapshot of in-core inode record, and the pointer to one of
+// the file handles if any held open. if a non-nil file handle is returned, its
+// operation counter will be increased by `incOpc`, a file handle's opc (a
+// sync.WaitGroup) will be waited before actually releasing the handle, to make
+// sure its pending operations always see the handle valid. and the caller is
+// responsible to call opc.Done() the exact number of times as each operation
+// done.
+func (icd *icFSD) GetInode(incRef int, inode vfs.InodeID, incOpc int) (
+	ici icInode, icfh *icfHandle, ok bool) {
 	icd.mu.Lock()
 	defer icd.mu.Unlock()
 
@@ -368,7 +391,15 @@ func (icd *icFSD) GetInode(incRef int, inode vfs.InodeID) (ici icInode, ok bool)
 	}
 
 	icip.refcnt += incRef
+
+	hsi := icip.fhHead
+	if hsi > 0 && incOpc > 0 {
+		icfh = &icd.fileHandles[hsi]
+		icfh.opc.Add(incOpc)
+	}
+
 	ici, ok = *icip, true
+
 	return
 }
 
@@ -474,13 +505,19 @@ func (icd *icFSD) CreateFileHandle(inode vfs.InodeID, inoF *os.File) (handle vfs
 		icd.freeFHIdxs = icd.freeFHIdxs[:nFreeHdls-1]
 		icd.fileHandles[hsi] = icfHandle{
 			isi: isi, inode: ici.inode, f: inoF,
+			nextFH: ici.fhHead,
 		}
 	} else {
 		hsi = len(icd.fileHandles)
 		icd.fileHandles = append(icd.fileHandles, icfHandle{
 			isi: isi, inode: ici.inode, f: inoF,
+			nextFH: ici.fhHead,
 		})
 	}
+	// insert this new handle as head of the inode's file handle list
+	ici.fhHead = hsi
+
+	// return this handle
 	handle = vfs.HandleID(hsi)
 
 	return
@@ -517,6 +554,14 @@ func (icd *icFSD) ReleaseFileHandle(handle int) {
 
 	if icfh.isi <= 0 { // isi 0 is root dir, not possible to be an opened file
 		panic(errors.New("releasing non-existing file handle ?!"))
+	}
+
+	// remove this handle from it's inode's file handle list
+	if icfh.prevFH == 0 { // being the list head, modify ici pointer
+		ici := &icd.stoInodes[icfh.isi]
+		ici.fhHead = icfh.nextFH
+	} else { // not the list head, cut this handle out from the list
+		icd.fileHandles[icfh.prevFH].nextFH = icfh.nextFH
 	}
 
 	// fill fields with zero values
