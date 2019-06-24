@@ -776,9 +776,11 @@ func (fs *fileSystem) OpenFile(
 	op.KeepPageCache = true
 	op.UseDirectIO = false
 
+	writable := (int(op.Flags) & (os.O_RDWR | os.O_WRONLY | os.O_APPEND)) != 0
+	createIfNE := (int(op.Flags) | os.O_CREATE) != 0
 	if err = co.SendCode(fmt.Sprintf(`
-OpenFile(%#v, %#v)
-`, op.Inode, op.Flags)); err != nil {
+OpenFile(%#v, %#v, %#v)
+`, op.Inode, writable, createIfNE)); err != nil {
 		panic(err)
 	}
 

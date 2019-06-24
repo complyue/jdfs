@@ -107,6 +107,8 @@ type icfHandle struct {
 
 	// f will be kept open until the handle closed
 	f *os.File
+	// whether opened writable
+	writable bool
 
 	// count of outstanding operations on the file, read/write/sync etc.
 	opc sync.WaitGroup
@@ -374,12 +376,15 @@ func (icd *icFSD) getInode(inode vfs.InodeID) *icInode {
 }
 
 // GetInode returns a snapshot of in-core inode record, and the pointer to one of
-// the file handles if any held open. if a non-nil file handle is returned, its
-// operation counter will be increased by `incOpc`, a file handle's opc (a
-// sync.WaitGroup) will be waited before actually releasing the handle, to make
-// sure its pending operations always see the handle valid. and the caller is
-// responsible to call opc.Done() the exact number of times as each operation
-// done.
+// the file handles if any held open, with writable ones prefered over readonly ones.
+//
+// if a non-nil file handle is returned, its operation counter will be increased by
+// `incOpc`. a file handle's opc (a sync.WaitGroup) will be waited before actually
+// releasing the handle, to make sure its pending operations always see the handle
+// valid.
+//
+// the caller is responsible to call opc.Done() the exact number of times as each
+// operation done.
 func (icd *icFSD) GetInode(incRef int, inode vfs.InodeID, incOpc int) (
 	ici icInode, icfh *icfHandle, ok bool) {
 	icd.mu.Lock()
@@ -392,10 +397,21 @@ func (icd *icFSD) GetInode(incRef int, inode vfs.InodeID, incOpc int) (
 
 	icip.refcnt += incRef
 
-	hsi := icip.fhHead
-	if hsi > 0 && incOpc > 0 {
-		icfh = &icd.fileHandles[hsi]
-		icfh.opc.Add(incOpc)
+	if incOpc > 0 {
+		var tmpFH *icfHandle
+		for hsi := icip.fhHead; hsi > 0; hsi = tmpFH.nextFH {
+			tmpFH = &icd.fileHandles[hsi]
+			if tmpFH.writable { // a writable handle is most preferable
+				icfh = tmpFH
+				break
+			}
+			if icfh == nil {
+				icfh = tmpFH // a readonly handle is fallback if none writable open
+			}
+		}
+		if icfh != nil {
+			icfh.opc.Add(incOpc) // increase opc with mu locked
+		}
 	}
 
 	ici, ok = *icip, true
@@ -482,7 +498,8 @@ func (icd *icFSD) ReleaseDirHandle(handle int) (released icdHandle) {
 	return
 }
 
-func (icd *icFSD) CreateFileHandle(inode vfs.InodeID, inoF *os.File) (handle vfs.HandleID, err error) {
+func (icd *icFSD) CreateFileHandle(inode vfs.InodeID, inoF *os.File, writable bool) (
+	handle vfs.HandleID, err error) {
 	icd.mu.Lock()
 	defer icd.mu.Unlock()
 
@@ -504,13 +521,13 @@ func (icd *icFSD) CreateFileHandle(inode vfs.InodeID, inoF *os.File) (handle vfs
 		hsi = icd.freeFHIdxs[nFreeHdls-1]
 		icd.freeFHIdxs = icd.freeFHIdxs[:nFreeHdls-1]
 		icd.fileHandles[hsi] = icfHandle{
-			isi: isi, inode: ici.inode, f: inoF,
+			isi: isi, inode: ici.inode, f: inoF, writable: writable,
 			nextFH: ici.fhHead,
 		}
 	} else {
 		hsi = len(icd.fileHandles)
 		icd.fileHandles = append(icd.fileHandles, icfHandle{
-			isi: isi, inode: ici.inode, f: inoF,
+			isi: isi, inode: ici.inode, f: inoF, writable: writable,
 			nextFH: ici.fhHead,
 		})
 	}

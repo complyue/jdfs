@@ -57,6 +57,16 @@ func chftimes(f *os.File, jdfPath string, nsec int64) error {
 	})
 }
 
+func fremovexattr(fd int, name string) error {
+	err := unix.Fremovexattr(fd, name)
+	switch err {
+	case syscall.ENOATTR: // macOS has real ENOATTR,
+		// vfs uses ENODATA for compatibility with Linux
+		err = vfs.ENOATTR
+	}
+	return err
+}
+
 func removexattr(jdfPath, name string) error {
 	err := unix.Removexattr(jdfPath, name)
 	switch err {
@@ -67,8 +77,28 @@ func removexattr(jdfPath, name string) error {
 	return err
 }
 
+func fgetxattr(fd int, name string, buf []byte) (int, error) {
+	n, err := unix.Fgetxattr(fd, name, buf)
+	switch err {
+	case syscall.ENOATTR: // macOS has real ENOATTR,
+		// vfs uses ENODATA for compatibility with Linux
+		err = vfs.ENOATTR
+	}
+	return n, err
+}
+
 func getxattr(jdfPath, name string, buf []byte) (int, error) {
 	n, err := unix.Getxattr(jdfPath, name, buf)
+	switch err {
+	case syscall.ENOATTR: // macOS has real ENOATTR,
+		// vfs uses ENODATA for compatibility with Linux
+		err = vfs.ENOATTR
+	}
+	return n, err
+}
+
+func flistxattr(fd int, buf []byte) (int, error) {
+	n, err := unix.Flistxattr(fd, buf)
 	switch err {
 	case syscall.ENOATTR: // macOS has real ENOATTR,
 		// vfs uses ENODATA for compatibility with Linux
@@ -85,6 +115,16 @@ func listxattr(jdfPath string, buf []byte) (int, error) {
 		err = vfs.ENOATTR
 	}
 	return n, err
+}
+
+func fsetxattr(fd int, name string, buf []byte, flags int) error {
+	err := unix.Fsetxattr(fd, name, buf, flags)
+	switch err {
+	case syscall.ENOATTR: // macOS has real ENOATTR,
+		// vfs uses ENODATA for compatibility with Linux
+		err = vfs.ENOATTR
+	}
+	return err
 }
 
 func setxattr(jdfPath, name string, buf []byte, flags int) error {

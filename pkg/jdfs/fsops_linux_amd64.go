@@ -58,16 +58,32 @@ func chftimes(f *os.File, jdfPath string, nsec int64) error {
 	})
 }
 
+func femovexattr(fd int, name string) error {
+	return unix.Fremovexattr(fd, name)
+}
+
 func removexattr(jdfPath, name string) error {
 	return unix.Removexattr(jdfPath, name)
+}
+
+func fgetxattr(fd int, name string, buf []byte) (int, error) {
+	return unix.Fgetxattr(fd, name, buf)
 }
 
 func getxattr(jdfPath, name string, buf []byte) (int, error) {
 	return unix.Getxattr(jdfPath, name, buf)
 }
 
+func flistxattr(fd int, buf []byte) (int, error) {
+	return unix.Flistxattr(fd, buf)
+}
+
 func listxattr(jdfPath string, buf []byte) (int, error) {
 	return unix.Llistxattr(jdfPath, buf)
+}
+
+func fsetxattr(fd int, name string, buf []byte, flags int) error {
+	return unix.Fsetxattr(fd, name, buf, flags)
 }
 
 func setxattr(jdfPath, name string, buf []byte, flags int) error {

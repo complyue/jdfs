@@ -63,16 +63,32 @@ func chftimes(f *os.File, jdfPath string, nsec int64) error {
 //
 // TODO add the support when Go does or a proper Go lib found
 
+func fremovexattr(fd int, name string) error {
+	return vfs.ENOATTR
+}
+
 func removexattr(jdfPath, name string) error {
 	return vfs.ENOATTR
+}
+
+func fgetxattr(fd int, name string, buf []byte) (int, error) {
+	return 0, vfs.ENOATTR
 }
 
 func getxattr(jdfPath, name string, buf []byte) (int, error) {
 	return 0, vfs.ENOATTR
 }
 
+func flistxattr(fd int, buf []byte) (int, error) {
+	return 0, nil
+}
+
 func listxattr(jdfPath string, buf []byte) (int, error) {
 	return 0, nil
+}
+
+func fsetxattr(fd int, name string, buf []byte, flags int) error {
+	return vfs.ENOSPC
 }
 
 func setxattr(jdfPath, name string, buf []byte, flags int) error {
