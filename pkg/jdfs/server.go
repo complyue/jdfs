@@ -710,11 +710,11 @@ func (efs *exportedFileSystem) CreateLink(parent vfs.InodeID, name string, targe
 			return err
 		}
 
+		var targetM iMeta
 		iciTarget, icfhTarget, ok := efs.icd.GetInode(0, target, 1)
 		if !ok {
 			return vfs.ENOENT
 		}
-		var targetM iMeta
 		if icfhTarget != nil {
 			defer icfhTarget.opc.Done()
 			if targetM, err = statFileHandle(icfhTarget); err != nil {
@@ -1117,6 +1117,9 @@ func (efs *exportedFileSystem) OpenFile(inode vfs.InodeID, writable, createIfNE 
 			err = vfs.ENOENT
 			return
 		}
+		if icfh != nil {
+			defer icfh.opc.Done()
+		}
 
 		if err := co.FinishRecv(); err != nil {
 			panic(err)
@@ -1142,7 +1145,6 @@ func (efs *exportedFileSystem) OpenFile(inode vfs.InodeID, writable, createIfNE 
 			}
 		}()
 		if icfh != nil {
-			defer icfh.opc.Done()
 			jdfPath := icfh.f.Name()
 			if writable && !icfh.writable {
 				// can not dup a readonly handle for write, open a new one
