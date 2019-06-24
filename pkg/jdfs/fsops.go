@@ -30,11 +30,14 @@ func (im iMeta) childPath(name string) string {
 
 func statFileHandle(icfh *icfHandle) (inoM iMeta, err error) {
 	var inoFI os.FileInfo
+	jdfPath := icfh.f.Name()
 	if inoFI, err = icfh.f.Stat(); err != nil {
-		glog.Fatalf("stat error through open file handle - %+v", errors.RichError(err))
+		glog.Fatalf("stat error through open file handle on [%s]:[%s] - %+v",
+			jdfsRootPath, jdfPath, errors.RichError(err))
 	}
-	if im := fi2im(icfh.f.Name(), inoFI); im.inode != icfh.inode {
-		glog.Fatalf("inode changed with open file handle ?!")
+	if im := fi2im(jdfPath, inoFI); im.inode != icfh.inode {
+		glog.Fatalf("opened inode [%d] [%s]:[%s] changed to [%d] ?!",
+			icfh.inode, jdfsRootPath, jdfPath, im.inode)
 	} else {
 		inoM = im
 	}
@@ -51,7 +54,8 @@ func statInode(inode vfs.InodeID, reachedThrough []string) (
 		jdfPath := reachedThrough[iPath]
 		var inoFI os.FileInfo
 		if inoFI, err = os.Lstat(jdfPath); err != nil {
-			glog.V(1).Infof("UNREACH inode [%d] not at [%s]:[%s] anymore - %+v", inode, jdfsRootPath, jdfPath, err)
+			glog.V(1).Infof("UNREACH inode [%d] not at [%s]:[%s] anymore - %+v",
+				inode, jdfsRootPath, jdfPath, err)
 			continue
 		}
 

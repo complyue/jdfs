@@ -383,7 +383,7 @@ func (icd *icFSD) getInode(inode vfs.InodeID) *icInode {
 // releasing the handle, to make sure its pending operations always see the handle
 // valid.
 //
-// the caller is responsible to call opc.Done() the exact number of times as each
+// the caller is responsible to call icd.FileHandleOpDone(icfh) the exact number of times as each
 // operation done.
 func (icd *icFSD) GetInode(incRef int, inode vfs.InodeID, incOpc int) (
 	ici icInode, icfh *icfHandle, ok bool) {
@@ -532,12 +532,24 @@ func (icd *icFSD) CreateFileHandle(inode vfs.InodeID, inoF *os.File, writable bo
 		})
 	}
 	// insert this new handle as head of the inode's file handle list
+	if ici.fhHead > 0 {
+		icd.fileHandles[ici.fhHead].prevFH = hsi
+	}
 	ici.fhHead = hsi
 
 	// return this handle
 	handle = vfs.HandleID(hsi)
 
+	if glog.V(2) {
+		glog.Infof("FH created file handle %d for [%d] [%s]:[%s]", handle, inode,
+			jdfsRootPath, inoF.Name())
+	}
+
 	return
+}
+
+func (icd *icFSD) FileHandleOpDone(icfh *icfHandle) {
+	icfh.opc.Done()
 }
 
 func (icd *icFSD) GetFileHandle(inode vfs.InodeID, handle int, incOpc int) (icfh *icfHandle, err error) {
@@ -567,28 +579,36 @@ func (icd *icFSD) GetFileHandle(inode vfs.InodeID, handle int, incOpc int) (icfh
 	return
 }
 
-func (icd *icFSD) ReleaseFileHandle(handle int) (inode vfs.InodeID, f *os.File) {
+func (icd *icFSD) ReleaseFileHandle(handle int) (inode vfs.InodeID, inoF *os.File) {
 	icd.mu.Lock()
 	defer icd.mu.Unlock()
 
 	icfh := &icd.fileHandles[handle]
 
 	if icfh.isi <= 0 { // isi 0 is root dir, not possible to be an opened file
-		panic(errors.New("releasing non-existing file handle ?!"))
+		glog.Fatal("releasing non-existing file handle ?!")
+	}
+
+	// grab handle data into return values before it gets cleared
+	inode, inoF = icfh.inode, icfh.f
+
+	if glog.V(2) {
+		glog.Infof("FH releasing file handle %d for [%d] [%s]:[%s]", handle, inode,
+			jdfsRootPath, inoF.Name())
 	}
 
 	// wait all operations done before closing the underlying file, or they'll fail
 	icfh.opc.Wait()
 
-	// grab handle data into return values before it gets cleared
-	inode, f = icfh.inode, icfh.f
-
 	// remove this handle from it's inode's file handle list
-	if icfh.prevFH == 0 { // being the list head, modify ici pointer
+	if icfh.nextFH > 0 {
+		icd.fileHandles[icfh.nextFH].prevFH = icfh.prevFH
+	}
+	if icfh.prevFH > 0 { // not the list head, cut this handle out from the list
+		icd.fileHandles[icfh.prevFH].nextFH = icfh.nextFH
+	} else { // being the list head, modify ici pointer
 		ici := &icd.stoInodes[icfh.isi]
 		ici.fhHead = icfh.nextFH
-	} else { // not the list head, cut this handle out from the list
-		icd.fileHandles[icfh.prevFH].nextFH = icfh.nextFH
 	}
 
 	// fill fields with zero values
