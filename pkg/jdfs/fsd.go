@@ -109,8 +109,8 @@ type icfHandle struct {
 	// whether opened writable
 	writable bool
 
-	// count of outstanding operations on the file, read/write/sync etc.
-	opc sync.WaitGroup
+	// counter of outstanding operations on this file handle, read/write/sync etc.
+	opc *sync.WaitGroup
 }
 
 // in-core filesystem data
@@ -522,12 +522,14 @@ func (icd *icFSD) CreateFileHandle(inode vfs.InodeID, inoF *os.File, writable bo
 		icd.fileHandles[hsi] = icfHandle{
 			isi: isi, inode: ici.inode, f: inoF, writable: writable,
 			nextFH: ici.fhHead,
+			opc:    new(sync.WaitGroup), // TODO this really necessary
 		}
 	} else {
 		hsi = len(icd.fileHandles)
 		icd.fileHandles = append(icd.fileHandles, icfHandle{
 			isi: isi, inode: ici.inode, f: inoF, writable: writable,
 			nextFH: ici.fhHead,
+			opc:    new(sync.WaitGroup), // TODO this really necessary
 		})
 	}
 	// insert this new handle as head of the inode's file handle list
