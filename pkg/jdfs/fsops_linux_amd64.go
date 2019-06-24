@@ -58,7 +58,7 @@ func chftimes(f *os.File, jdfPath string, nsec int64) error {
 	})
 }
 
-func femovexattr(fd int, name string) error {
+func fremovexattr(fd int, name string) error {
 	return unix.Fremovexattr(fd, name)
 }
 
