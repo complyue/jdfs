@@ -148,7 +148,7 @@ func (efs *exportedFileSystem) LookUpInode(parent vfs.InodeID, name string) {
 
 	var ce vfs.ChildInodeEntry
 	fse := vfs.FsErr(func() error {
-		ici, ok := efs.icd.GetInode(0, parent)
+		ici, icfh, ok := efs.icd.GetInode(0, parent)
 		if !ok {
 			return vfs.ENOENT
 		}
@@ -159,7 +159,7 @@ func (efs *exportedFileSystem) LookUpInode(parent vfs.InodeID, name string) {
 		// note this has nothing to do with FUSE kernel caching.
 		if children == nil || time.Now().Sub(ici.lastChildrenChecked) > 10*time.Millisecond {
 			// read dir contents from local fs, cache to children list
-			parentM, childMs, outdatedPaths, err := readInodeDir(parent, ici.reachedThrough)
+			parentM, childMs, outdatedPaths, err := readInodeDir(parent, icfh, ici.reachedThrough)
 			if err != nil {
 				return err
 			}
@@ -434,10 +434,12 @@ func (efs *exportedFileSystem) MkDir(parent vfs.InodeID, name string, mode uint3
 	var ce vfs.ChildInodeEntry
 
 	fse := vfs.FsErr(func() error {
-		ici, ok := efs.icd.GetInode(0, parent)
+		ici, icfh, ok := efs.icd.GetInode(0, parent, 0)
 		if !ok {
 			return vfs.ENOENT
 		}
+		// parent can not have open file handle, always stat the local fs namespace for
+		// a reachable path to parent dir.
 		parentM, outdatedPaths, err := statInode(ici.inode, ici.reachedThrough)
 		if err != nil {
 			return err
@@ -518,7 +520,7 @@ func (efs *exportedFileSystem) CreateFile(parent vfs.InodeID, name string, mode 
 				}
 			}
 		}()
-		ici, ok := efs.icd.GetInode(0, parent)
+		ici, _, ok := efs.icd.GetInode(0, parent, 0)
 		if !ok {
 			err = vfs.ENOENT
 			return
@@ -537,7 +539,9 @@ func (efs *exportedFileSystem) CreateFile(parent vfs.InodeID, name string, mode 
 		// perform requested FUSE op on local fs
 		childPath := parentM.childPath(name)
 		if cF, err = os.OpenFile(childPath,
-			os.O_EXCL|os.O_CREATE|os.O_RDWR, os.FileMode(mode),
+			// TODO need to figure out how to tell whether end user has specified O_EXCL
+			// os.O_EXCL|
+			os.O_CREATE|os.O_RDWR, os.FileMode(mode),
 		); err != nil {
 			return
 		}
@@ -606,7 +610,7 @@ func (efs *exportedFileSystem) CreateSymlink(parent vfs.InodeID, name string, ta
 	var ce vfs.ChildInodeEntry
 
 	fse := vfs.FsErr(func() error {
-		ici, ok := efs.icd.GetInode(0, parent)
+		ici, _, ok := efs.icd.GetInode(0, parent, 0)
 		if !ok {
 			return vfs.ENOENT
 		}
@@ -676,7 +680,7 @@ func (efs *exportedFileSystem) CreateLink(parent vfs.InodeID, name string, targe
 	var ce vfs.ChildInodeEntry
 
 	fse := vfs.FsErr(func() error {
-		ici, ok := efs.icd.GetInode(0, parent)
+		ici, _, ok := efs.icd.GetInode(0, parent, 0)
 		if !ok {
 			return vfs.ENOENT
 		}
@@ -688,13 +692,24 @@ func (efs *exportedFileSystem) CreateLink(parent vfs.InodeID, name string, targe
 			return err
 		}
 
-		iciTarget, ok := efs.icd.GetInode(0, target)
-		targetM, outdatedPaths, err := statInode(iciTarget.inode, iciTarget.reachedThrough)
-		if err != nil {
-			return err
+		iciTarget, icfhTarget, ok := efs.icd.GetInode(0, target, 1)
+		if !ok {
+			return vfs.ENOENT
 		}
-		if iciTarget, ok = efs.icd.LoadInode(0, targetM, outdatedPaths, nil, time.Now()); !ok {
-			return err
+		var targetM iMeta
+		if icfhTarget != nil {
+			defer icfhTarget.opc.Done()
+			if targetM, err = statFileHandle(icfhTarget); err != nil {
+				return err
+			}
+		} else {
+			var outdatedPaths []string
+			if targetM, outdatedPaths, err = statInode(iciTarget.inode, iciTarget.reachedThrough); err != nil {
+				return err
+			}
+			if iciTarget, ok = efs.icd.LoadInode(0, targetM, outdatedPaths, nil, time.Now()); !ok {
+				return vfs.ENOENT
+			}
 		}
 
 		// perform requested FUSE op on local fs
@@ -753,7 +768,7 @@ func (efs *exportedFileSystem) Rename(oldParent vfs.InodeID, oldName string, new
 	}
 
 	fse := vfs.FsErr(func() error {
-		iciOldParent, ok := efs.icd.GetInode(0, oldParent)
+		iciOldParent, _, ok := efs.icd.GetInode(0, oldParent, 0)
 		if !ok {
 			return vfs.ENOENT
 		}
@@ -765,7 +780,7 @@ func (efs *exportedFileSystem) Rename(oldParent vfs.InodeID, oldName string, new
 			return err
 		}
 
-		iciNewParent, ok := efs.icd.GetInode(0, newParent)
+		iciNewParent, _, ok := efs.icd.GetInode(0, newParent, 0)
 		if !ok {
 			return vfs.ENOENT
 		}
@@ -830,7 +845,7 @@ func (efs *exportedFileSystem) RmDir(parent vfs.InodeID, name string) {
 	}
 
 	fse := vfs.FsErr(func() error {
-		ici, ok := efs.icd.GetInode(0, parent)
+		ici, _, ok := efs.icd.GetInode(0, parent, 0)
 		if !ok {
 			return vfs.ENOENT
 		}
@@ -878,7 +893,7 @@ func (efs *exportedFileSystem) Unlink(parent vfs.InodeID, name string) {
 	}
 
 	fse := vfs.FsErr(func() error {
-		ici, ok := efs.icd.GetInode(0, parent)
+		ici, _, ok := efs.icd.GetInode(0, parent, 0)
 		if !ok {
 			return vfs.ENOENT
 		}
@@ -927,11 +942,18 @@ func (efs *exportedFileSystem) OpenDir(inode vfs.InodeID) {
 
 	var handle vfs.HandleID
 	fse := vfs.FsErr(func() error {
-		ici, ok := efs.icd.GetInode(0, inode)
+		ici, _, ok := efs.icd.GetInode(0, inode, 0)
 		if !ok {
 			return vfs.ENOENT
 		}
-		parentM, childMs, outdatedPaths, err := readInodeDir(ici.inode, ici.reachedThrough)
+		parentM, outdatedPaths, err := statInode(ici.inode, ici.reachedThrough)
+		if err != nil {
+			return err
+		}
+		if ici, ok = efs.icd.LoadInode(0, parentM, outdatedPaths, nil, time.Now()); !ok {
+			return vfs.ENOENT
+		}
+		childMs, err := readInodeDir(parentM)
 		if err != nil {
 			return err
 		}
@@ -1067,11 +1089,20 @@ func (efs *exportedFileSystem) ReleaseDirHandle(handle int) {
 	}
 }
 
+const (
+	OpenFlagsMask = os.O_APPEND | os.O_CREATE | os.O_RDONLY | os.O_RDWR | os.O_WRONLY
+)
+
 func (efs *exportedFileSystem) OpenFile(inode vfs.InodeID, flags uint32) {
 	co := efs.ho.Co()
 
 	if err := co.FinishRecv(); err != nil {
 		panic(err)
+	}
+
+	maskedOpenFlag := int(flags) & OpenFlagsMask
+	if maskedOpenFlag != int(flags) {
+		glog.Warningf("Extra file open flag %x cleared.", maskedOpenFlag^int(flags))
 	}
 
 	handle, fsErr := func() (handle vfs.HandleID, err error) {
@@ -1084,24 +1115,29 @@ func (efs *exportedFileSystem) OpenFile(inode vfs.InodeID, flags uint32) {
 				oF.Close() // don't leak it on error
 			}
 		}()
-		ici, ok := efs.icd.GetInode(0, inode)
+		ici, icfh, ok := efs.icd.GetInode(0, inode, 1)
 		if !ok {
 			err = vfs.ENOENT
 			return
 		}
-		inoM, outdatedPaths, e := statInode(ici.inode, ici.reachedThrough)
-		if e != nil {
-			err = e
-			return
-		}
-		if ici, ok = efs.icd.LoadInode(0, inoM, outdatedPaths, nil, time.Now()); !ok {
-			err = e
-			return
-		}
+		if icfh != nil {
+			defer icfh.opc.Done()
 
-		jdfPath := inoM.jdfPath
-		if oF, err = os.OpenFile(jdfPath, int(flags), 0644); err != nil {
-			return
+			oF = fdopen()
+		} else {
+			inoM, outdatedPaths, e := statInode(ici.inode, ici.reachedThrough)
+			if e != nil {
+				err = e
+				return
+			}
+			if ici, ok = efs.icd.LoadInode(0, inoM, outdatedPaths, nil, time.Now()); !ok {
+				err = e
+				return
+			}
+			jdfPath := inoM.jdfPath
+			if oF, err = os.OpenFile(jdfPath, maskedOpenFlag, 0644); err != nil {
+				return
+			}
 		}
 
 		if handle, err = efs.icd.CreateFileHandle(ici.inode, oF); err != nil {
