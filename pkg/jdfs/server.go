@@ -556,7 +556,8 @@ func (efs *exportedFileSystem) CreateFile(parent vfs.InodeID, name string, mode 
 		childPath := parentM.childPath(name)
 		if cF, err = os.OpenFile(childPath,
 			// TODO need to figure out how to tell whether end user has specified O_EXCL
-			os.O_EXCL|os.O_CREATE|os.O_RDWR, os.FileMode(mode),
+			// os.O_EXCL|
+			os.O_CREATE|os.O_RDWR, os.FileMode(mode),
 		); err != nil {
 			return
 		}

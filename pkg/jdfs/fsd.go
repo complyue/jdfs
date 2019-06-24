@@ -3,7 +3,6 @@ package jdfs
 import (
 	"os"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/complyue/jdfs/pkg/errors"
@@ -470,7 +469,7 @@ func (icd *icFSD) GetDirHandle(inode vfs.InodeID, handle int) (icdh icdHandle, e
 
 	ici := &icd.stoInodes[icdh.isi]
 	if ici.inode != inode {
-		err = syscall.ESTALE // TODO fuse kernel is happy with this ?
+		err = vfs.EINVAL
 		return
 	}
 
@@ -567,7 +566,7 @@ func (icd *icFSD) GetFileHandle(inode vfs.InodeID, handle int, incOpc int) (icfh
 	if inode != 0 { // 0 for no inode to be matched
 		ici := &icd.stoInodes[icfh.isi]
 		if ici.inode != inode {
-			err = syscall.ESTALE // TODO fuse kernel is happy with this ?
+			err = vfs.EINVAL
 			return
 		}
 	}
