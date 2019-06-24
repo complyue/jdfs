@@ -323,97 +323,88 @@ func (efs *exportedFileSystem) SetInodeAttributes(inode vfs.InodeID,
 
 	var attrs vfs.InodeAttributes
 
-	fse := vfs.FsErr(func() error {
+	fse := vfs.FsErr(func() (err error) {
+		var outdatedPaths []string
+		var inoF *os.File
+		var writable bool
+		var inoM iMeta
 		ici, icfh, ok := efs.icd.GetInode(0, inode, 1)
 		if !ok {
 			return vfs.ENOENT // no such inode
 		}
 		if icfh != nil {
 			defer icfh.opc.Done()
-
-			// XXX
-		}
-
-		if inoM, outdatedPaths, err := statInode(ici.inode, ici.reachedThrough); err != nil {
-			return err // local fs error at jdfs
+			if inoM, err = statFileHandle(icfh); err != nil {
+				return
+			}
+			inoF, writable = icfh.f, icfh.writable
 		} else {
-			// update refreshed meta data to in-core inode record
-			if ici, ok = efs.icd.LoadInode(0, inoM, outdatedPaths, nil, time.Now()); !ok {
-				return vfs.ENOENT
-			}
-
-			// perform FUSE requested ops on local fs
-			jdfPath := inoM.jdfPath
-
-			oFlags := os.O_RDONLY            // open readonly as fallback
-			if inoM.attrs.Mode.IsRegular() { // only consider writable open for regular file
-				// open the file writable is more desirable, esp. to change file size
-				// but if it is readonly, open writable will fail, insisting so will make jdfc
-				// unable to chmod a readonly file to be writable.
-				if inoM.attrs.Uid == jdfsUID {
-					if inoM.attrs.Mode&(1<<7) != 0 {
-						oFlags = os.O_RDWR
-					}
-				} else if inoM.attrs.Gid == jdfsGID {
-					if inoM.attrs.Mode&(1<<4) != 0 {
-						oFlags = os.O_RDWR
-					}
-				} else {
-					if inoM.attrs.Mode&(1<<1) != 0 {
-						oFlags = os.O_RDWR
-					}
-				}
-			}
-
-			inoF, err := os.OpenFile(jdfPath, oFlags, 0)
-			if err != nil {
-				return err
-			}
-			defer inoF.Close()
-
-			if chgSize {
-				if glog.V(2) {
-					glog.Infof("Setting size of [%d] [%s]:[%s] to %d bytes", ici.inode,
-						jdfsRootPath, jdfPath, sz)
-				}
-
-				if err := inoF.Truncate(int64(sz)); err != nil {
-					return err
-				}
-			}
-
-			if chgMode {
-				if glog.V(2) {
-					glog.Infof("Setting mode of [%d] [%s]:[%s] to [%+v]", ici.inode,
-						jdfsRootPath, jdfPath, os.FileMode(mode))
-				}
-
-				if err := inoF.Chmod(os.FileMode(mode)); err != nil {
-					return err
-				}
-			}
-
-			if chgMtime {
-				if glog.V(2) {
-					glog.Infof("Setting mtim of [%d] [%s]:[%s] to %v", ici.inode,
-						jdfsRootPath, jdfPath, time.Unix(0, mNsec))
-				}
-
-				if err := chftimes(inoF, jdfPath, mNsec); err != nil {
-					return err
-				}
-			}
-
-			// stat local fs again for new meta attrs
-			if inoFI, err := os.Lstat(jdfPath); err != nil {
-				return err // local fs error
-			} else if ici, ok = efs.icd.LoadInode(0, fi2im(jdfPath, inoFI), nil, nil, time.Now()); !ok {
-				return vfs.ENOENT // inode disappeared
-			} else {
-				attrs = ici.attrs
-				return nil
+			if inoM, outdatedPaths, err = statInode(ici.inode, ici.reachedThrough); err != nil {
+				return
 			}
 		}
+		jdfPath := inoM.jdfPath
+
+		// perform FUSE requested ops on local fs
+
+		if chgSize {
+			if glog.V(2) {
+				glog.Infof("SZ setting size of [%d] [%s]:[%s] to %d bytes", ici.inode,
+					jdfsRootPath, jdfPath, sz)
+			}
+			if inoF == nil || !writable {
+				if inoF, err = os.OpenFile(jdfPath, os.O_RDWR, 0); err != nil {
+					return
+				}
+				defer inoF.Close()
+			}
+			if err = inoF.Truncate(int64(sz)); err != nil {
+				return
+			}
+		}
+
+		if chgMode {
+			if glog.V(2) {
+				glog.Infof("MOD setting mode of [%d] [%s]:[%s] to [%+v]", ici.inode,
+					jdfsRootPath, jdfPath, os.FileMode(mode))
+			}
+
+			if inoF != nil {
+				if err = inoF.Chmod(os.FileMode(mode)); err != nil {
+					return
+				}
+			} else {
+				if err = os.Chmod(jdfPath, os.FileMode(mode)); err != nil {
+					return
+				}
+			}
+		}
+
+		if chgMtime {
+			if glog.V(2) {
+				glog.Infof("MTIM setting mtime of [%d] [%s]:[%s] to %v", ici.inode,
+					jdfsRootPath, jdfPath, time.Unix(0, mNsec))
+			}
+
+			if inoF != nil && writable {
+				if err = chftimes(inoF, jdfPath, mNsec); err != nil {
+					return
+				}
+			} else {
+				// TODO set mtime without opened
+			}
+		}
+
+		// stat local fs again for new meta attrs
+		if inoFI, e := os.Lstat(jdfPath); e != nil {
+			err = e // local fs error
+			return
+		} else if ici, ok = efs.icd.LoadInode(0, fi2im(jdfPath, inoFI), outdatedPaths, nil, time.Now()); !ok {
+			err = vfs.ENOENT // inode disappeared
+			return
+		}
+		attrs = ici.attrs
+		return
 	}())
 
 	if err := co.StartSend(); err != nil {
@@ -1119,21 +1110,28 @@ func (efs *exportedFileSystem) ReleaseDirHandle(handle int) {
 func (efs *exportedFileSystem) OpenFile(inode vfs.InodeID, writable, createIfNE bool) {
 	co := efs.ho.Co()
 
-	if err := co.FinishRecv(); err != nil {
-		panic(err)
-	}
-
-	var openFlags int
-	if writable {
-		openFlags = os.O_RDWR
-	} else {
-		openFlags = os.O_RDONLY
-	}
-	if createIfNE {
-		openFlags |= os.O_CREATE
-	}
-
 	handle, fsErr := func() (handle vfs.HandleID, err error) {
+		// do this before the underlying HBI wire released
+		ici, icfh, ok := efs.icd.GetInode(0, inode, 1)
+		if !ok {
+			err = vfs.ENOENT
+			return
+		}
+
+		if err := co.FinishRecv(); err != nil {
+			panic(err)
+		}
+
+		var openFlags int
+		if writable {
+			openFlags = os.O_RDWR
+		} else {
+			openFlags = os.O_RDONLY
+		}
+		if createIfNE {
+			openFlags |= os.O_CREATE
+		}
+
 		var oF *os.File
 		defer func() {
 			if e := recover(); e != nil {
@@ -1143,24 +1141,27 @@ func (efs *exportedFileSystem) OpenFile(inode vfs.InodeID, writable, createIfNE 
 				oF.Close() // don't leak it on error
 			}
 		}()
-		ici, icfh, ok := efs.icd.GetInode(0, inode, 1)
-		if !ok {
-			err = vfs.ENOENT
-			return
-		}
 		if icfh != nil {
 			defer icfh.opc.Done()
 			jdfPath := icfh.f.Name()
-			if !writable && icfh.writable {
+			if writable && !icfh.writable {
+				// can not dup a readonly handle for write, open a new one
+				if oF, err = os.OpenFile(jdfPath, openFlags, 0644); err != nil {
+					return
+				}
+			} else if !writable && icfh.writable {
 				// todo should this be a problem ?
 				glog.V(1).Infof("Reusing a writable file handle on [%d] [%s]:[%s] for readonly.",
 					inode, jdfsRootPath, jdfPath)
 			}
-			var fd int
-			if fd, err = syscall.Dup(int(icfh.f.Fd())); err != nil {
-				return
+			if oF == nil {
+				// fd can be dup'ed
+				var fd int
+				if fd, err = syscall.Dup(int(icfh.f.Fd())); err != nil {
+					return
+				}
+				oF = os.NewFile(uintptr(fd), jdfPath)
 			}
-			oF = os.NewFile(uintptr(fd), jdfPath)
 		} else {
 			inoM, outdatedPaths, e := statInode(ici.inode, ici.reachedThrough)
 			if e != nil {
@@ -1209,25 +1210,18 @@ func (efs *exportedFileSystem) OpenFile(inode vfs.InodeID, writable, createIfNE 
 func (efs *exportedFileSystem) ReadFile(inode vfs.InodeID, handle int, offset int64, bufSz int) {
 	co := efs.ho.Co()
 
+	// do this before the underlying HBI wire released
+	icfh, fsErr := efs.icd.GetFileHandle(inode, handle, 1)
+
+	if err := co.FinishRecv(); err != nil {
+		panic(err)
+	}
+
 	var bytesRead int
 	var buf []byte
-	icfh, fsErr := efs.icd.GetFileHandle(inode, handle)
 	if fsErr == nil {
 		func() {
-			// make sure the underlying file is not closed due to handle release,
-			// before this op done
-			icfh.opc.Add(1)
 			defer icfh.opc.Done()
-
-			// leverage the fact that HBI conversations over TCP wire is already
-			// serialized by the transport mechanism, simply do add to opc before
-			// releasing the HBI wire is enough.
-			//
-			// TODO implement correct opc before other HBI transport mechanisms (e.g. QUIC)
-			//      those not serializing conversations are to be supported.
-			if err := co.FinishRecv(); err != nil {
-				panic(err)
-			}
 
 			buf = efs.bufPool.Get(bufSz)
 			defer efs.bufPool.Return(buf)
@@ -1281,23 +1275,16 @@ func (efs *exportedFileSystem) WriteFile(inode vfs.InodeID, handle int, offset i
 		panic(err)
 	}
 
-	icfh, fsErr := efs.icd.GetFileHandle(inode, handle)
+	// do this before the underlying HBI wire released
+	icfh, fsErr := efs.icd.GetFileHandle(inode, handle, 1)
+
+	if err := co.FinishRecv(); err != nil {
+		panic(err)
+	}
+
 	if fsErr == nil {
 		func() {
-			// make sure the underlying file is not closed due to handle release,
-			// before this op done
-			icfh.opc.Add(1)
 			defer icfh.opc.Done()
-
-			// leverage the fact that HBI conversations over TCP wire is already
-			// serialized by the transport mechanism, simply do add to opc before
-			// releasing the HBI wire is enough.
-			//
-			// TODO implement correct opc before other HBI transport mechanisms (e.g. QUIC)
-			//      those not serializing conversations are to be supported.
-			if err := co.FinishRecv(); err != nil {
-				panic(err)
-			}
 
 			bytesWritten := 0
 			bytesWritten, fsErr = icfh.f.WriteAt(buf, offset)
@@ -1305,6 +1292,10 @@ func (efs *exportedFileSystem) WriteFile(inode vfs.InodeID, handle int, offset i
 			if glog.V(2) {
 				glog.Infof("Written %d bytes @%d to file [%d] [%s]:[%s] with handle %d", bytesWritten, offset,
 					icfh.inode, jdfsRootPath, icfh.f.Name(), handle)
+			}
+			if fsErr != nil {
+				glog.Errorf("Error writing file [%d] [%s]:[%s] with handle %d - %+v",
+					icfh.inode, jdfsRootPath, icfh.f.Name(), handle, fsErr)
 			}
 		}()
 	}
@@ -1325,23 +1316,16 @@ func (efs *exportedFileSystem) WriteFile(inode vfs.InodeID, handle int, offset i
 func (efs *exportedFileSystem) SyncFile(inode vfs.InodeID, handle int) {
 	co := efs.ho.Co()
 
-	icfh, fsErr := efs.icd.GetFileHandle(inode, handle)
+	// do this before the underlying HBI wire released
+	icfh, fsErr := efs.icd.GetFileHandle(inode, handle, 1)
+
+	if err := co.FinishRecv(); err != nil {
+		panic(err)
+	}
+
 	if fsErr == nil {
 		func() {
-			// make sure the underlying file is not closed due to handle release,
-			// before this op done
-			icfh.opc.Add(1)
 			defer icfh.opc.Done()
-
-			// leverage the fact that HBI conversations over TCP wire is already
-			// serialized by the transport mechanism, simply do add to opc before
-			// releasing the HBI wire is enough.
-			//
-			// TODO implement correct opc before other HBI transport mechanisms (e.g. QUIC)
-			//      those not serializing conversations are to be supported.
-			if err := co.FinishRecv(); err != nil {
-				panic(err)
-			}
 
 			fsErr = icfh.f.Sync()
 
@@ -1367,29 +1351,26 @@ func (efs *exportedFileSystem) SyncFile(inode vfs.InodeID, handle int) {
 func (efs *exportedFileSystem) ReleaseFileHandle(handle int) {
 	co := efs.ho.Co()
 
+	// do this before the underlying HBI wire released
+	inode, f := efs.icd.ReleaseFileHandle(handle)
+
 	if err := co.FinishRecv(); err != nil {
 		panic(err)
 	}
 
-	icfh, fsErr := efs.icd.GetFileHandle(0, handle)
-	if fsErr == nil {
-		// wait all operations done before closing the underlying file, or they'll fail
-		icfh.opc.Wait()
-
-		if err := icfh.f.Close(); err != nil {
-			glog.Errorf("Error on closing jdfs file [%s]:[%s] - %+v",
-				jdfsRootPath, icfh.f.Name(), err)
-		}
-
-		if glog.V(2) {
-			glog.Infof("File handle %d closed for file [%d] [%s]:[%s]", handle, icfh.inode,
-				jdfsRootPath, icfh.f.Name())
-		}
-	} else {
-		glog.Fatalf("Unexpected local fs error [%T] - %+v", fsErr, fsErr)
+	if f == nil {
+		panic("no file pointer from released file handle ?!")
+	}
+	jdfPath := f.Name()
+	if err := f.Close(); err != nil {
+		glog.Errorf("Error on closing jdfs file [%s]:[%s] - %+v",
+			jdfsRootPath, jdfPath, err)
 	}
 
-	efs.icd.ReleaseFileHandle(handle)
+	if glog.V(2) {
+		glog.Infof("REL file handle %d released for file [%d] [%s]:[%s]", handle, inode,
+			jdfsRootPath, jdfPath)
+	}
 }
 
 func (efs *exportedFileSystem) ReadSymlink(inode vfs.InodeID) {

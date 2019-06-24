@@ -6,6 +6,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/complyue/jdfs/pkg/errors"
 	"github.com/complyue/jdfs/pkg/vfs"
 	"github.com/golang/glog"
 )
@@ -22,15 +23,15 @@ type iMeta struct {
 func (im iMeta) childPath(name string) string {
 	if len(im.jdfPath) > 0 && im.jdfPath != "." {
 		return fmt.Sprintf("%s/%s", im.jdfPath, name)
-	} else { // 1st level child of root dir
-		return name
 	}
+	// 1st level child of root dir
+	return name
 }
 
 func statFileHandle(icfh *icfHandle) (inoM iMeta, err error) {
 	var inoFI os.FileInfo
 	if inoFI, err = icfh.f.Stat(); err != nil {
-		glog.Fatalf("stat error through open file handle - %+v", err)
+		glog.Fatalf("stat error through open file handle - %+v", errors.RichError(err))
 	}
 	if im := fi2im(icfh.f.Name(), inoFI); im.inode != icfh.inode {
 		glog.Fatalf("inode changed with open file handle ?!")

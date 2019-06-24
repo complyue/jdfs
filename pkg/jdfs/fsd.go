@@ -410,7 +410,7 @@ func (icd *icFSD) GetInode(incRef int, inode vfs.InodeID, incOpc int) (
 			}
 		}
 		if icfh != nil {
-			icfh.opc.Add(incOpc) // increase opc with mu locked
+			icfh.opc.Add(incOpc) // increase operation counter with mu locked
 		}
 	}
 
@@ -540,7 +540,7 @@ func (icd *icFSD) CreateFileHandle(inode vfs.InodeID, inoF *os.File, writable bo
 	return
 }
 
-func (icd *icFSD) GetFileHandle(inode vfs.InodeID, handle int) (icfh *icfHandle, err error) {
+func (icd *icFSD) GetFileHandle(inode vfs.InodeID, handle int, incOpc int) (icfh *icfHandle, err error) {
 	icd.mu.Lock()
 	defer icd.mu.Unlock()
 
@@ -560,10 +560,14 @@ func (icd *icFSD) GetFileHandle(inode vfs.InodeID, handle int) (icfh *icfHandle,
 		}
 	}
 
+	if incOpc > 0 {
+		icfh.opc.Add(incOpc) // increase operation counter with mu locked
+	}
+
 	return
 }
 
-func (icd *icFSD) ReleaseFileHandle(handle int) {
+func (icd *icFSD) ReleaseFileHandle(handle int) (inode vfs.InodeID, f *os.File) {
 	icd.mu.Lock()
 	defer icd.mu.Unlock()
 
@@ -572,6 +576,12 @@ func (icd *icFSD) ReleaseFileHandle(handle int) {
 	if icfh.isi <= 0 { // isi 0 is root dir, not possible to be an opened file
 		panic(errors.New("releasing non-existing file handle ?!"))
 	}
+
+	// wait all operations done before closing the underlying file, or they'll fail
+	icfh.opc.Wait()
+
+	// grab handle data into return values before it gets cleared
+	inode, f = icfh.inode, icfh.f
 
 	// remove this handle from it's inode's file handle list
 	if icfh.prevFH == 0 { // being the list head, modify ici pointer
@@ -585,4 +595,6 @@ func (icd *icFSD) ReleaseFileHandle(handle int) {
 	*icfh = icfHandle{}
 
 	icd.freeFHIdxs = append(icd.freeFHIdxs, handle)
+
+	return
 }

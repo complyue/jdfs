@@ -85,8 +85,8 @@ func (fse FsError) Repr() string {
 	case ENOATTR:
 		return "ENOATTR"
 	}
-	panic(fmt.Sprintf("Unexpected file system error number %#x on %s %s",
-		int(fse), runtime.GOOS, runtime.GOARCH))
+	panic(fmt.Sprintf("Unexpected file system error number %#x on %s %s - %+v",
+		int(fse), runtime.GOOS, runtime.GOARCH, syscall.Errno(fse)))
 }
 
 // FsErr converts an arbitrary error occurred on jdfs local filesystem to the portable FsError type
