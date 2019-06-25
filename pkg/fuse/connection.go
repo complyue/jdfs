@@ -429,6 +429,14 @@ func (c *Connection) shouldLogError(
 	}
 
 	switch op.(type) {
+
+	case *GetInodeAttributesOp:
+		// with JDFS as a networked filesystem, it's normal for an inode seen by
+		// jdfc but later disappears from jdfs, thus this case.
+		if err == syscall.ENOENT {
+			return false
+		}
+
 	case *LookUpInodeOp:
 		// It is totally normal for the kernel to ask to look up an inode by name
 		// and find the name doesn't exist. For example, this happens when linking
@@ -437,15 +445,21 @@ func (c *Connection) shouldLogError(
 			return false
 		}
 
+	case *ListXattrOp:
+		if err == syscall.ERANGE {
+			return false
+		}
 	case *GetXattrOp:
 		if err == syscall.ENODATA || err == syscall.ERANGE {
 			return false
 		}
+
 	case *unknownOp:
 		// Don't bother the user with methods we intentionally don't support.
 		if err == syscall.ENOSYS {
 			return false
 		}
+
 	}
 
 	return true
