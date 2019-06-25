@@ -423,7 +423,7 @@ func (c *Connection) shouldLogError(
 		return false
 	}
 
-	if err == vfs.EEXIST {
+	if vfs.FsErr(err) == vfs.EEXIST {
 		// with JDFS as a networked filesystem, it's normal for jdfc to hit an
 		// dir/file created by others since last check.
 		return false
