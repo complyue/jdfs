@@ -1222,7 +1222,7 @@ func (efs *exportedFileSystem) ReadFile(inode vfs.InodeID, handle int, offset in
 		buf = efs.bufPool.Get(bufSz)
 		defer efs.bufPool.Return(buf)
 
-		if bytesRead, err = icfh.f.ReadAt(buf, offset); err != nil {
+		if bytesRead, err = icfh.f.ReadAt(buf, offset); err != nil && err != io.EOF {
 			glog.Errorf("Error reading file [%d] [%s]:[%s] with handle %d - %+v",
 				inode, jdfsRootPath, icfh.f.Name(), handle, err)
 			return err
