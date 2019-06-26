@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"sync"
+	"syscall"
 
 	"github.com/complyue/jdfs/pkg/errors"
 	"github.com/complyue/jdfs/pkg/fuse"
@@ -124,7 +125,11 @@ func (s *fileSystemServer) handleOp(
 			// we invalidate attrs cache on flush (i.e. handle close), so the kernel knows it needs
 			// to contact jdfs for new file size. if kernel not to update the cached file size,
 			// programs like `git clone` won't work.
-			if err := c.InvalidateNode(typed.Inode, 0, 0); err != nil && err != vfs.ENOENT {
+			//
+			// use negative offset to avoid invalidation of page cache, both macOS and Linux drop
+			// page cache even with offset==0 && len==0
+			// https://github.com/torvalds/linux/blob/4ae004a9bca8bef118c2b4e76ee31c7df4514f18/fs/fuse/inode.c#L344
+			if err := c.InvalidateNode(typed.Inode, -1, 0); err != nil && err != syscall.ENOENT {
 				return errors.Wrapf(err, "Unexpected fuse kernel error on inode invalidation [%T]", err)
 			}
 			return nil
