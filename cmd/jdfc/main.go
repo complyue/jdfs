@@ -79,15 +79,15 @@ Simple usage:
 		// allow mounting on to none empty dirs on linux
 		"nonempty": "",
 
-		// allow root by default, nested mounting won't be possible if root is denied access
+		// allow others by default, nested mounting won't be possible if root is denied access
 		// note FUSE is required to be configured accordingly:
 		//   Linux:
-		//      user_allow_other should be present (uncommented) in /etc/fuse.conf as well
+		//      user_allow_other should be present (uncommented) in /etc/fuse.conf
 		//   macOS:
 		//      user need to belong to osxfuse Admin group, see:
-		//      https://github.com/osxfuse/osxfuse/wiki/Mount-options#allow_root
-		//
-		"allow_root": "",
+		//      https://github.com/osxfuse/osxfuse/wiki/Mount-options#allow_other
+		// we use allow_other instead of allow_root as fusermount on Linux doesn't support it.
+		"allow_other": "",
 	}
 	for optKey, optVa := range jdfsURL.Query() {
 		if optKey == "ro" {
