@@ -126,18 +126,27 @@ func ResolveJDFS(urlArg, mountpoint string) (jdfsURL *url.URL,
 			}
 			jdfsHostName = jdfsRootURL.Hostname()
 			jdfsPort = jdfsRootURL.Port()
+
 			var mpRel string
 			if mpRel, err = filepath.Rel(atDir, mountpoint); err != nil {
 				err = errors.Errorf("Can not determine relative path from [%s] to [%s]", atDir, mountpoint)
 				return
 			}
+			if mpRel == "." {
+				mpRel = ""
+			}
+
+			jdfsRootPath := jdfsRootURL.Path
+			if len(jdfsRootPath) <= 0 || jdfsRootPath == "/" {
+				jdfsRootPath = ""
+			}
 
 			glog.V(1).Infof("Using relative path [%s] appended to root jdfs url [%s] configured in [%s]",
 				mpRel, magicRoot, magicFn)
-			if len(jdfsRootURL.Path) <= 0 {
+			if len(jdfsRootPath) <= 0 {
 				jdfsPath = mpRel
 			} else {
-				jdfsPath = filepath.Join(jdfsRootURL.Path, mpRel)
+				jdfsPath = filepath.Join(jdfsRootPath, mpRel)
 			}
 
 			// inherite query/fragment from configured root url

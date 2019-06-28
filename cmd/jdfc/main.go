@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strings"
+	"path/filepath"
 
 	"github.com/complyue/jdfs/pkg/fuse"
 	"github.com/complyue/jdfs/pkg/jdfc"
@@ -93,9 +93,7 @@ Simple usage:
 		ReadOnly: readOnly,
 
 		// for macOS
-		VolumeName: strings.NewReplacer("/", "~", ":", "#").Replace(
-			fmt.Sprintf("%s%%%s", jdfsHost, jdfsPath),
-		),
+		VolumeName: filepath.Base(mountpoint),
 
 		ErrorLogger: log.New(os.Stderr, "jdfc: ", 0),
 
