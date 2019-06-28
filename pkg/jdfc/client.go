@@ -19,6 +19,29 @@ import (
 	"github.com/complyue/hbi/interop"
 )
 
+// PrepareHostingEnv creates and prepares a hosting environment to be reacting to jdfs
+func PrepareHostingEnv() *hbi.HostingEnv {
+	he := hbi.NewHostingEnv()
+
+	// expose names for interop
+	interop.ExposeInterOpValues(he)
+
+	// expose portable fs error constants
+	he.ExposeValue("EOKAY", vfs.EOKAY)
+	he.ExposeValue("EEXIST", vfs.EEXIST)
+	he.ExposeValue("EINVAL", vfs.EINVAL)
+	he.ExposeValue("EIO", vfs.EIO)
+	he.ExposeValue("ENOENT", vfs.ENOENT)
+	he.ExposeValue("ENOSYS", vfs.ENOSYS)
+	he.ExposeValue("ENOTDIR", vfs.ENOTDIR)
+	he.ExposeValue("ENOTEMPTY", vfs.ENOTEMPTY)
+	he.ExposeValue("ERANGE", vfs.ERANGE)
+	he.ExposeValue("ENOSPC", vfs.ENOSPC)
+	he.ExposeValue("ENOATTR", vfs.ENOATTR)
+
+	return he
+}
+
 // MountJDFS mounts a remote JDFS filesystem directory (can be root path or sub
 // directory under the exported root), to a local mountpoint, then serves
 // fs operations over HBI connections between this jdfc and the jdfs, to be
@@ -51,6 +74,8 @@ func MountJDFS(
 		}
 	}()
 
+	he := PrepareHostingEnv()
+
 	fs := &fileSystem{
 		readOnly: cfg.ReadOnly,
 		jdfsPath: jdfsPath,
@@ -58,22 +83,6 @@ func MountJDFS(
 		jdfcUID: uint32(os.Geteuid()), jdfcGID: uint32(os.Getegid()),
 	}
 
-	// prepare the hosting environment to be reacting to jdfs
-	he := hbi.NewHostingEnv()
-	// expose names for interop
-	interop.ExposeInterOpValues(he)
-	// expose portable fs error constants
-	he.ExposeValue("EOKAY", vfs.EOKAY)
-	he.ExposeValue("EEXIST", vfs.EEXIST)
-	he.ExposeValue("EINVAL", vfs.EINVAL)
-	he.ExposeValue("EIO", vfs.EIO)
-	he.ExposeValue("ENOENT", vfs.ENOENT)
-	he.ExposeValue("ENOSYS", vfs.ENOSYS)
-	he.ExposeValue("ENOTDIR", vfs.ENOTDIR)
-	he.ExposeValue("ENOTEMPTY", vfs.ENOTEMPTY)
-	he.ExposeValue("ERANGE", vfs.ERANGE)
-	he.ExposeValue("ENOSPC", vfs.ENOSPC)
-	he.ExposeValue("ENOATTR", vfs.ENOATTR)
 	// expose fs as the reactor
 	he.ExposeReactor(fs)
 
@@ -89,20 +98,20 @@ func MountJDFS(
 	}
 
 	he.ExposeFunction("__hbi_cleanup__", func(discReason string) {
+		// terminate jdfc (the FUSE user process), this leaves the mountpoint denying all
+		// services. this is actually better than unmounting it, as naive programs may
+		// think all files have been deleted due to the unmount, or even
+		// start writing new files under paths of the mountpoint (which is not JDFS anymore).
+		//
+		// next run of jdfc for the same mountpoint will try unmounting immediately
+		// before the new mounting attempt, if broken FUSE mount detected. that's not
+		// perfect yet, but opens much smaller window of time for naive programs working
+		// on the JDFS mount to make mistakes.
+
 		if len(discReason) > 0 {
 			fmt.Printf("jdfs disconnected due to: %s", discReason)
 			os.Exit(6)
 		}
-
-		// terminate jdfc (the FUSE user process) for now, this leaves the mountpoint
-		// denying all services. this is actually better than unmounting it, as naive
-		// programs may think all files have been deleted due to the unmount, or even
-		// start writing new files under paths of the mountpoint (which is not JDFS anymore).
-		//
-		// next run of jdfc for the same mountpoint will try unmounting immediately
-		// before new mounting attempt, if broken FUSE mount detected. that's not
-		// perfect yet, but opens much smaller window of time for naive programs working
-		// on the JDFS mount to make mistakes.
 		os.Exit(0)
 
 		// todo auto reconnect jdfs. but need to figure out the way to tell FUSE kernel
