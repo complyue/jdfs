@@ -220,12 +220,11 @@ Mount(%#v, %#v)
 		return
 	}(); err != nil {
 		fs.po, fs.ho = nil, nil
-		glog.Errorf("JDFS mount failed: %+v", err)
+		glog.Errorf("Error comm with jdfs: %+v", err)
 		if !po.Disconnected() {
 			po.Disconnect(fmt.Sprintf("server mount failed: %v", err), false)
 		}
-		// TODO handle this failure, reconnect or unmount ?
-		os.Exit(7) // fail hard for now
+		os.Exit(7) // fail hard
 	}
 }
 
