@@ -76,7 +76,18 @@ Simple usage:
 
 	readOnly := false
 	mntOpts := map[string]string{
-		"nonempty": "", // allow mounting on to none empty dirs on linux
+		// allow mounting on to none empty dirs on linux
+		"nonempty": "",
+
+		// allow root by default, nested mounting won't be possible if root is denied access
+		// note FUSE is required to be configured accordingly:
+		//   Linux:
+		//      user_allow_other should be present (uncommented) in /etc/fuse.conf as well
+		//   macOS:
+		//      user need to belong to osxfuse Admin group, see:
+		//      https://github.com/osxfuse/osxfuse/wiki/Mount-options#allow_root
+		//
+		"allow_root": "",
 	}
 	for optKey, optVa := range jdfsURL.Query() {
 		if optKey == "ro" {
