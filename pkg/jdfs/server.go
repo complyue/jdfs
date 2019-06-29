@@ -82,10 +82,18 @@ type exportedFileSystem struct {
 
 func (efs *exportedFileSystem) NamesToExpose() []string {
 	return []string{
-		"Mount", "StatFS", "LookUpInode", "GetInodeAttributes", "SetInodeAttributes", "ForgetInode",
-		"MkDir", "CreateFile", "CreateSymlink", "CreateLink", "Rename", "RmDir", "Unlink",
-		"OpenDir", "ReadDir", "ReleaseDirHandle", "OpenFile", "ReadFile", "WriteFile", "SyncFile",
-		"ReleaseFileHandle", "ReadSymlink", "RemoveXattr", "GetXattr", "ListXattr", "SetXattr",
+		// house keeping
+		"Mount", "StatFS",
+
+		// vfs operations
+		"LookUpInode", "GetInodeAttributes", "SetInodeAttributes", "ForgetInode",
+		"MkDir", "CreateFile", "CreateSymlink", "CreateLink", "Rename", "RmDir",
+		"Unlink", "OpenDir", "ReadDir", "ReleaseDirHandle", "OpenFile", "ReadFile",
+		"WriteFile", "SyncFile", "ReleaseFileHandle", "ReadSymlink", "RemoveXattr",
+		"GetXattr", "ListXattr", "SetXattr",
+
+		// direct data file access
+		"FindJDF", "CreateJDF", "AllocJDF", "ReadJDF", "WriteJDF",
 	}
 }
 
