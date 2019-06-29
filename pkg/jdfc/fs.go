@@ -54,8 +54,6 @@ func (s *fileSystemServer) handleOp(
 	// Dispatch to the appropriate method.
 	var err error
 	switch typed := op.(type) {
-	default:
-		err = vfs.ENOSYS
 
 	case *vfs.StatFSOp:
 		err = s.fs.StatFS(ctx, typed)
@@ -152,6 +150,14 @@ func (s *fileSystemServer) handleOp(
 
 	case *vfs.SetXattrOp:
 		err = s.fs.SetXattr(ctx, typed)
+
+	default:
+		err = vfs.ENOSYS
+	}
+
+	// convert portable error type back to os specific errno error type
+	if fse, ok := err.(vfs.FsError); ok {
+		err = syscall.Errno(fse)
 	}
 
 	c.Reply(ctx, err)
