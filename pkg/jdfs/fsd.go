@@ -7,6 +7,7 @@ import (
 
 	"github.com/complyue/jdfs/pkg/errors"
 	"github.com/complyue/jdfs/pkg/vfs"
+
 	"github.com/golang/glog"
 )
 
@@ -104,7 +105,7 @@ type icfHandle struct {
 	// if prefFH is 0, this handle is the head of the list
 	prevFH, nextFH int
 
-	// f will be kept open until the handle closed
+	// f will be kept open until this handle closed
 	f *os.File
 	// whether opened writable
 	writable bool
@@ -522,14 +523,14 @@ func (icd *icFSD) CreateFileHandle(inode vfs.InodeID, inoF *os.File, writable bo
 		icd.fileHandles[hsi] = icfHandle{
 			isi: isi, inode: ici.inode, f: inoF, writable: writable,
 			nextFH: ici.fhHead,
-			opc:    new(sync.WaitGroup), // TODO this really necessary
+			opc:    new(sync.WaitGroup),
 		}
 	} else {
 		hsi = len(icd.fileHandles)
 		icd.fileHandles = append(icd.fileHandles, icfHandle{
 			isi: isi, inode: ici.inode, f: inoF, writable: writable,
 			nextFH: ici.fhHead,
-			opc:    new(sync.WaitGroup), // TODO this really necessary
+			opc:    new(sync.WaitGroup),
 		})
 	}
 	// insert this new handle as head of the inode's file handle list

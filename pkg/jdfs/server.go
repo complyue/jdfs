@@ -78,6 +78,9 @@ type exportedFileSystem struct {
 
 	// buffer pool
 	bufPool BufPool
+
+	// in-core data file data
+	dfd icDFD
 }
 
 func (efs *exportedFileSystem) NamesToExpose() []string {
@@ -93,7 +96,8 @@ func (efs *exportedFileSystem) NamesToExpose() []string {
 		"GetXattr", "ListXattr", "SetXattr",
 
 		// direct data file access
-		"FindJDF", "CreateJDF", "AllocJDF", "ReadJDF", "WriteJDF",
+		"FindJDF", "StatJDF", "OpenJDF", "AllocJDF", "ReadJDF", "WriteJDF",
+		"ExtendJDF", "SyncJDF", "CloseJDF",
 	}
 }
 
@@ -110,6 +114,11 @@ func (efs *exportedFileSystem) Mount(readOnly bool, jdfsPath string) {
 
 	jdfsRootPath = rootPath
 	if err := efs.icd.init(readOnly); err != nil {
+		efs.ho.Disconnect(fmt.Sprintf("%s", err), true)
+		panic(err)
+	}
+
+	if err := efs.dfd.init(readOnly); err != nil {
 		efs.ho.Disconnect(fmt.Sprintf("%s", err), true)
 		panic(err)
 	}
