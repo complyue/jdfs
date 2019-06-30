@@ -8,7 +8,9 @@ import (
 	"syscall"
 
 	"github.com/complyue/hbi"
+
 	"github.com/complyue/jdfs/pkg/vfs"
+
 	"github.com/golang/glog"
 )
 
@@ -32,6 +34,12 @@ func (efs *exportedFileSystem) OpenJDF(jdfPath string,
 		panic(err)
 	}
 
+	mfPath := fmt.Sprintf("%s.%s", jdfPath, metaExt)
+	metaBuf, err := ioutil.ReadFile(mfPath)
+	if err != nil {
+		panic(err)
+	}
+
 	dfPath := fmt.Sprintf("%s.%s", jdfPath, dataExt)
 	f, err := os.OpenFile(dfPath, os.O_RDWR, 0644)
 	if err != nil {
@@ -49,6 +57,19 @@ func (efs *exportedFileSystem) OpenJDF(jdfPath string,
 		panic(err)
 	}
 
+	if err = co.StartSend(); err != nil {
+		panic(err)
+	}
+
+	if err = co.SendObj(hbi.Repr(len(metaBuf))); err != nil {
+		panic(err)
+	}
+	if len(metaBuf) > 0 {
+		if err = co.SendData(metaBuf); err != nil {
+			panic(err)
+		}
+	}
+
 	if err = co.SendObj(hbi.Repr(dataSize)); err != nil {
 		panic(err)
 	}
@@ -63,24 +84,24 @@ func (efs *exportedFileSystem) AllocJDF(jdfPath string,
 	metaExt, dataExt string, metaSize int32, dataSize uintptr) {
 	co := efs.ho.Co()
 
+	var metaBuf []byte
 	if metaSize > 0 {
-		func() {
-			metaBuf := efs.bufPool.Get(int(metaSize))
-			defer efs.bufPool.Return(metaBuf)
-			if err := co.RecvData(metaBuf); err != nil {
-				panic(err)
-			}
-			mfPath := fmt.Sprintf("%s.%s", jdfPath, metaExt)
-			if replaceExisting { // remove existing and ignore error - esp. ENOENT
-				syscall.Unlink(mfPath)
-			}
-			if err := ioutil.WriteFile(mfPath, metaBuf, 0644); err != nil {
-				panic(err)
-			}
-		}()
+		metaBuf = efs.bufPool.Get(int(metaSize))
+		defer efs.bufPool.Return(metaBuf)
+		if err := co.RecvData(metaBuf); err != nil {
+			panic(err)
+		}
 	}
 
 	if err := co.FinishRecv(); err != nil {
+		panic(err)
+	}
+
+	mfPath := fmt.Sprintf("%s.%s", jdfPath, metaExt)
+	if replaceExisting { // remove existing and ignore error - esp. ENOENT
+		syscall.Unlink(mfPath)
+	}
+	if err := ioutil.WriteFile(mfPath, metaBuf, 0644); err != nil {
 		panic(err)
 	}
 
@@ -99,6 +120,10 @@ func (efs *exportedFileSystem) AllocJDF(jdfPath string,
 	handle, err := efs.dfd.CreateFileHandle(jdfPath, metaExt, dataExt, f)
 	if err != nil {
 		f.Close()
+		panic(err)
+	}
+
+	if err = co.StartSend(); err != nil {
 		panic(err)
 	}
 
@@ -140,6 +165,10 @@ func (efs *exportedFileSystem) ReadJDF(handle vfs.DataFileHandle,
 				bytesRead, dataOffset, dfh.inode, jdfsRootPath, dfh.f.Name(), handle)
 		}
 	}()
+
+	if err = co.StartSend(); err != nil {
+		panic(err)
+	}
 
 	if err := co.SendObj(hbi.Repr(len(buf))); err != nil {
 		panic(err)
