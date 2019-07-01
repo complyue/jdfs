@@ -81,7 +81,7 @@ type icInode struct {
 type icdHandle struct {
 	isi int
 
-	jdfPath string
+	inode vfs.InodeID
 
 	entries []vfs.DirEnt
 }
@@ -419,7 +419,7 @@ func (icd *icFSD) GetInode(incRef int, inode vfs.InodeID, incOpc int) (
 	return
 }
 
-func (icd *icFSD) CreateDirHandle(inode vfs.InodeID, entries []vfs.DirEnt) (handle vfs.HandleID, err error) {
+func (icd *icFSD) CreateDirHandle(inode vfs.InodeID) (handle vfs.HandleID, err error) {
 	icd.mu.Lock()
 	defer icd.mu.Unlock()
 
@@ -441,12 +441,12 @@ func (icd *icFSD) CreateDirHandle(inode vfs.InodeID, entries []vfs.DirEnt) (hand
 		hsi = icd.freeDHIdxs[nFreeHdls-1]
 		icd.freeDHIdxs = icd.freeDHIdxs[:nFreeHdls-1]
 		icd.dirHandles[hsi] = icdHandle{
-			isi: isi, jdfPath: ici.reachedThrough[0], entries: entries,
+			isi: isi, inode: inode,
 		}
 	} else {
 		hsi = len(icd.dirHandles)
 		icd.dirHandles = append(icd.dirHandles, icdHandle{
-			isi: isi, jdfPath: ici.reachedThrough[0], entries: entries,
+			isi: isi, inode: inode,
 		})
 	}
 	handle = vfs.HandleID(hsi)
@@ -454,9 +454,14 @@ func (icd *icFSD) CreateDirHandle(inode vfs.InodeID, entries []vfs.DirEnt) (hand
 	return
 }
 
-func (icd *icFSD) GetDirHandle(inode vfs.InodeID, handle int) (icdh icdHandle, err error) {
+func (icd *icFSD) GetDirHandle(inode vfs.InodeID, handle int, entries []vfs.DirEnt) (
+	icdh icdHandle, err error) {
 	icd.mu.Lock()
 	defer icd.mu.Unlock()
+
+	if entries != nil {
+		icd.dirHandles[handle].entries = entries
+	}
 
 	// snapshot the value instead of getting a pointer, tho it's unlikely the handle be
 	// destroyed before read, but just in case.

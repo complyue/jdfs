@@ -973,82 +973,20 @@ func (efs *exportedFileSystem) OpenDir(inode vfs.InodeID) {
 		panic(err)
 	}
 
-	var handle vfs.HandleID
-	fse := vfs.FsErr(func() error {
-		ici, _, ok := efs.icd.GetInode(0, inode, 0)
-		if !ok {
-			return vfs.ENOENT
-		}
-		parentM, outdatedPaths, err := statInode(ici.inode, ici.reachedThrough)
-		if err != nil {
-			return err
-		}
-		if ici, ok = efs.icd.LoadInode(0, parentM, outdatedPaths, nil, time.Now()); !ok {
-			return vfs.ENOENT
-		}
-		childMs, err := readInodeDir(parentM)
-		if err != nil {
-			return err
-		}
-		checkTime := time.Now()
+	handle, fse := efs.icd.CreateDirHandle(inode)
 
-		if glog.V(2) {
-			glog.Infof("Loaded %d entries for [%s]:[%s]", len(childMs), jdfsRootPath,
-				parentM.jdfPath)
-		}
-
-		var children map[string]vfs.InodeID
-		var entries []vfs.DirEnt
-		if len(childMs) > 0 {
-			children = make(map[string]vfs.InodeID, len(childMs))
-			entries = make([]vfs.DirEnt, 0, len(childMs))
-		}
-		for i := range childMs {
-			childM := &childMs[i]
-
-			children[childM.name] = childM.inode
-
-			cMode := childM.attrs.Mode
-			entType := vfs.DT_Unknown
-			if cMode.IsDir() {
-				entType = vfs.DT_Directory
-			} else if cMode.IsRegular() {
-				entType = vfs.DT_File
-			} else if cMode&os.ModeSymlink != 0 {
-				entType = vfs.DT_Link
-			} else {
-				if glog.V(1) {
-					glog.Infof("jdfs [%s]:[%s]/[%s] has mode [%v], not revealed to jdfc.",
-						jdfsRootPath, parentM.jdfPath, childM.name, cMode)
-				}
-				continue // hide this strange inode to jdfc
-			}
-			entries = append(entries, vfs.DirEnt{
-				Offset: vfs.DirOffset(len(entries) + 1),
-				Inode:  childM.inode,
-				Name:   childM.name,
-				Type:   entType,
-			})
-		}
-		if ici, ok = efs.icd.LoadInode(0, parentM, outdatedPaths, children, checkTime); !ok {
-			return vfs.ENOENT
-		}
-
-		if handle, err = efs.icd.CreateDirHandle(inode, entries); err != nil {
-			return err
-		}
-
-		return nil
-	}())
+	if glog.V(2) {
+		glog.Infof("LS created dir handle [%d] for [%d] - %+v", handle, inode, fse)
+	}
 
 	if err := co.StartSend(); err != nil {
 		panic(err)
 	}
 
-	if err := co.SendObj(fse.Repr()); err != nil {
+	if err := co.SendObj(vfs.FsErr(fse).Repr()); err != nil {
 		panic(err)
 	}
-	if fse != 0 {
+	if fse != nil {
 		return
 	}
 
@@ -1064,9 +1002,75 @@ func (efs *exportedFileSystem) ReadDir(inode vfs.InodeID, handle int, offset int
 		panic(err)
 	}
 
+	var entries []vfs.DirEnt
+	var fse vfs.FsError
+	if offset == 0 { // reading from start, refresh entry list
+		fse = vfs.FsErr(func() error {
+			ici, _, ok := efs.icd.GetInode(0, inode, 0)
+			if !ok {
+				return vfs.ENOENT
+			}
+			parentM, outdatedPaths, err := statInode(ici.inode, ici.reachedThrough)
+			if err != nil {
+				return err
+			}
+			if ici, ok = efs.icd.LoadInode(0, parentM, outdatedPaths, nil, time.Now()); !ok {
+				return vfs.ENOENT
+			}
+			childMs, err := readInodeDir(parentM)
+			if err != nil {
+				return err
+			}
+			checkTime := time.Now()
+
+			if glog.V(2) {
+				glog.Infof("LS loaded %d entries for [%s]:[%s]", len(childMs), jdfsRootPath,
+					parentM.jdfPath)
+			}
+
+			var children map[string]vfs.InodeID
+			if len(childMs) > 0 {
+				children = make(map[string]vfs.InodeID, len(childMs))
+				entries = make([]vfs.DirEnt, 0, len(childMs))
+			}
+			for i := range childMs {
+				childM := &childMs[i]
+
+				children[childM.name] = childM.inode
+
+				cMode := childM.attrs.Mode
+				entType := vfs.DT_Unknown
+				if cMode.IsDir() {
+					entType = vfs.DT_Directory
+				} else if cMode.IsRegular() {
+					entType = vfs.DT_File
+				} else if cMode&os.ModeSymlink != 0 {
+					entType = vfs.DT_Link
+				} else {
+					if glog.V(1) {
+						glog.Infof("jdfs [%s]:[%s]/[%s] has mode [%v], not revealed to jdfc.",
+							jdfsRootPath, parentM.jdfPath, childM.name, cMode)
+					}
+					continue // hide this strange inode to jdfc
+				}
+				entries = append(entries, vfs.DirEnt{
+					Offset: vfs.DirOffset(len(entries) + 1),
+					Inode:  childM.inode,
+					Name:   childM.name,
+					Type:   entType,
+				})
+			}
+			if ici, ok = efs.icd.LoadInode(0, parentM, outdatedPaths, children, checkTime); !ok {
+				return vfs.ENOENT
+			}
+
+			return nil
+		}())
+	}
+
 	var bytesRead int
 	var buf []byte
-	icdh, fsErr := efs.icd.GetDirHandle(inode, handle)
+	icdh, fsErr := efs.icd.GetDirHandle(inode, handle, entries)
 	if fsErr == nil {
 		buf = efs.bufPool.Get(bufSz)
 		defer efs.bufPool.Return(buf)
@@ -1081,8 +1085,8 @@ func (efs *exportedFileSystem) ReadDir(inode vfs.InodeID, handle int, offset int
 		}
 
 		if glog.V(2) {
-			glog.Infof("Prepared %d (%d~%d) of %d entries for dir [%s]:[%s]", i-offset,
-				offset, i, len(icdh.entries), jdfsRootPath, icdh.jdfPath)
+			glog.Infof("LS returning %d (%d~%d) of %d entries from handle [%d] for dir [%d]",
+				i-offset, offset, i, len(icdh.entries), handle, icdh.inode)
 		}
 	}
 
@@ -1090,7 +1094,6 @@ func (efs *exportedFileSystem) ReadDir(inode vfs.InodeID, handle int, offset int
 		panic(err)
 	}
 
-	fse := vfs.FsErr(fsErr)
 	if err := co.SendObj(fse.Repr()); err != nil {
 		panic(err)
 	}
@@ -1118,7 +1121,7 @@ func (efs *exportedFileSystem) ReleaseDirHandle(handle int) {
 	released := efs.icd.ReleaseDirHandle(handle)
 
 	if glog.V(2) {
-		glog.Infof("Released dir handle for [%s]:[%s]", jdfsRootPath, released.jdfPath)
+		glog.Infof("LS released dir handle [%d] for [%d]", handle, released.inode)
 	}
 }
 
