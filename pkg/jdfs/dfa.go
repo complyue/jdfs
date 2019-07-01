@@ -166,7 +166,7 @@ func (efs *exportedFileSystem) ReadJDF(handle vfs.DataFileHandle,
 		}
 	}()
 
-	if err = co.StartSend(); err != nil {
+	if err := co.StartSend(); err != nil {
 		panic(err)
 	}
 
