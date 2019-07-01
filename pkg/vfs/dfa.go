@@ -87,4 +87,5 @@ func (lb *DataFileListBuilder) ToSend() (listLen int, pathFlatLen int, payload [
 		lb.pathFlatBuf.Bytes(),
 		(*[maxAllocSize]byte)(unsafe.Pointer(&lb.pathLens[0]))[0:pathLensBytes:pathLensBytes],
 	}
+	return
 }
