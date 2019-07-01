@@ -5,3 +5,6 @@
 // smartos (a.k.a. illumos, solaris) specific artifacts for now, but without that, jdfs can not
 // be built for smartos if it depends on fuse.
 package vfs
+
+// maxAllocSize is the size used when creating array pointers.
+const maxAllocSize = 0x7FFFFFFF
