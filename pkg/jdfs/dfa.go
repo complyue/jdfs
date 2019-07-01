@@ -45,10 +45,10 @@ func listJDF(dir string, lb *vfs.DataFileListBuilder, metaExt, dataExt string) {
 		} else if childFI.Mode().IsRegular() {
 			// a regular file
 			if strings.HasSuffix(fn, metaExt) {
-				dfPath := fn[:len(fn)-len(metaExt)]
+				dfPath := dir + "/" + fn[:len(fn)-len(metaExt)]
 				metaList = append(metaList, dfPath)
 			} else if strings.HasSuffix(fn, dataExt) {
-				dfPath := fn[:len(fn)-len(dataExt)]
+				dfPath := dir + "/" + fn[:len(fn)-len(dataExt)]
 				dataSizes[dfPath] = childFI.Size()
 			}
 		} else if (childFI.Mode() & os.ModeSymlink) != 0 {
@@ -362,8 +362,7 @@ func (efs *exportedFileSystem) WriteJDF(handle vfs.DataFileHandle,
 	// todo send bytesWritten back ?
 }
 
-func (efs *exportedFileSystem) ExtendJDF(handle vfs.DataFileHandle,
-	dataSize uintptr) {
+func (efs *exportedFileSystem) ExtendJDF(handle vfs.DataFileHandle, dataSize uintptr) {
 	co := efs.ho.Co()
 
 	// do this before the underlying HBI wire released
