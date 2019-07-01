@@ -187,7 +187,7 @@ func (efs *exportedFileSystem) ReadJDF(handle vfs.DataFileHandle,
 		bytesRead, err = dfh.f.ReadAt(buf, int64(dataOffset))
 		if err != nil {
 			if err == io.EOF {
-				err = nil // eof is not of interest
+				err = nil // eof is of no interest for jdf consumers
 			} else {
 				glog.Errorf("Error reading data file [%d] [%s]:[%s] with handle %d - %+v",
 					dfh.inode, jdfsRootPath, dfh.f.Name(), handle, err)
@@ -250,13 +250,9 @@ func (efs *exportedFileSystem) WriteJDF(handle vfs.DataFileHandle,
 		var bytesWritten int
 		bytesWritten, err = dfh.f.WriteAt(buf, int64(dataOffset))
 		if err != nil {
-			if err == io.EOF {
-				err = nil // eof is of no interest for df consumer
-			} else {
-				glog.Errorf("Error writing data file [%d] [%s]:[%s] with handle %d - %+v",
-					dfh.inode, jdfsRootPath, dfh.f.Name(), handle, err)
-				return
-			}
+			glog.Errorf("Error writing data file [%d] [%s]:[%s] with handle %d - %+v",
+				dfh.inode, jdfsRootPath, dfh.f.Name(), handle, err)
+			return
 		}
 
 		if glog.V(2) {
