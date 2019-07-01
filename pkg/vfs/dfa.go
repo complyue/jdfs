@@ -10,25 +10,25 @@ import (
 type DataFileHandle int
 
 type DataFileList struct {
-	Sizes    []uint64
+	Sizes    []int64
 	PathFlat []byte
-	PathLens []uint32
+	PathLens []int32
 }
 
 func (dfl *DataFileList) Len() int {
 	return len(dfl.Sizes)
 }
 
-func (dfl *DataFileList) EnumList(dfcb func(
-	path string, size uint64,
+func (dfl *DataFileList) Each(dfcb func(
+	idx int, path string, size int64,
 ) error) error {
 	l := len(dfl.Sizes)
-	var pathStart uint32
+	var pathStart int32
 	for i := 0; i < l; i++ {
 		pathEnd := pathStart + dfl.PathLens[i]
 		path := string(dfl.PathFlat[pathStart:pathEnd])
 		size := dfl.Sizes[i]
-		if err := dfcb(path, size); err != nil {
+		if err := dfcb(i, path, size); err != nil {
 			return err
 		}
 		pathStart = pathEnd
@@ -38,12 +38,12 @@ func (dfl *DataFileList) EnumList(dfcb func(
 
 func DataFileListToFill(listLen int, pathFlatLen int) (dfl *DataFileList, bufs [][]byte) {
 	dfl = &DataFileList{
-		Sizes:    make([]uint64, listLen),
+		Sizes:    make([]int64, listLen),
 		PathFlat: make([]byte, pathFlatLen),
-		PathLens: make([]uint32, listLen),
+		PathLens: make([]int32, listLen),
 	}
-	sizesBytes := uint64(listLen) * uint64(unsafe.Sizeof(dfl.Sizes[0]))
-	pathLensBytes := uint64(listLen) * uint64(unsafe.Sizeof(dfl.PathLens[0]))
+	sizesBytes := int64(listLen) * int64(unsafe.Sizeof(dfl.Sizes[0]))
+	pathLensBytes := int64(listLen) * int64(unsafe.Sizeof(dfl.PathLens[0]))
 	bufs = [][]byte{
 		(*[maxAllocSize]byte)(unsafe.Pointer(&dfl.Sizes[0]))[0:sizesBytes:sizesBytes],
 		dfl.PathFlat,
@@ -53,19 +53,19 @@ func DataFileListToFill(listLen int, pathFlatLen int) (dfl *DataFileList, bufs [
 }
 
 type DataFileListBuilder struct {
-	sizes       []uint64
+	sizes       []int64
 	pathFlatBuf bytes.Buffer
-	pathLens    []uint32
+	pathLens    []int32
 }
 
-func (lb *DataFileListBuilder) Add(path string, size uint64) (err error) {
+func (lb *DataFileListBuilder) Add(path string, size int64) (err error) {
 	var n int
 	n, err = lb.pathFlatBuf.WriteString(path)
 	if err != nil {
 		return
 	}
 	lb.sizes = append(lb.sizes, size)
-	lb.pathLens = append(lb.pathLens, uint32(n))
+	lb.pathLens = append(lb.pathLens, int32(n))
 	return
 }
 
@@ -80,8 +80,8 @@ func (lb *DataFileListBuilder) PathFlatLen() int {
 func (lb *DataFileListBuilder) ToSend() (listLen int, pathFlatLen int, payload [][]byte) {
 	listLen = len(lb.sizes)
 	pathFlatLen = lb.pathFlatBuf.Len()
-	sizesBytes := uint64(listLen) * uint64(unsafe.Sizeof(lb.sizes[0]))
-	pathLensBytes := uint64(listLen) * uint64(unsafe.Sizeof(lb.pathLens[0]))
+	sizesBytes := int64(listLen) * int64(unsafe.Sizeof(lb.sizes[0]))
+	pathLensBytes := int64(listLen) * int64(unsafe.Sizeof(lb.pathLens[0]))
 	payload = [][]byte{
 		(*[maxAllocSize]byte)(unsafe.Pointer(&lb.sizes[0]))[0:sizesBytes:sizesBytes],
 		lb.pathFlatBuf.Bytes(),

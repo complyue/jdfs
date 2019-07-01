@@ -5,6 +5,7 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"strings"
 	"syscall"
 
 	"github.com/complyue/hbi"
@@ -16,14 +17,95 @@ import (
 
 // direct data file access methods
 
-func (efs *exportedFileSystem) ListJDF(pathPrefix string,
-	metaExt, dataExt string) {
+func listJDF(dir string, lb *vfs.DataFileListBuilder, metaExt, dataExt string) {
+	if len(dir) <= 0 {
+		dir = "."
+	}
 
-	// searchRoot, err := os.OpenFile(pathPrefix, os.O_RDONLY, 0)
-	// if err != nil {
-	// 	panic(err)
-	// }
+	df, err := os.OpenFile(dir, os.O_RDONLY, 0)
+	if err != nil {
+		glog.Errorf("LSDF failed opening dir [%s]:[%s] - %+v", jdfsRootPath, dir, err)
+		return
+	}
+	childFIs, err := df.Readdir(0)
+	df.Close()
+	if err != nil {
+		glog.Errorf("LSDF failed reading dir [%s]:[%s] - %+v", jdfsRootPath, dir, err)
+		return
+	}
 
+	var subdirList []string
+	var metaList []string
+	dataSizes := make(map[string]int64)
+	for _, childFI := range childFIs {
+		fn := childFI.Name()
+		if childFI.IsDir() {
+			// a dir
+			subdirList = append(subdirList, fn)
+		} else if childFI.Mode().IsRegular() {
+			// a regular file
+			if strings.HasSuffix(fn, metaExt) {
+				dfPath := fn[:len(fn)-len(metaExt)]
+				metaList = append(metaList, dfPath)
+			} else if strings.HasSuffix(fn, dataExt) {
+				dfPath := fn[:len(fn)-len(dataExt)]
+				dataSizes[dfPath] = childFI.Size()
+			}
+		} else if (childFI.Mode() & os.ModeSymlink) != 0 {
+			// a symlink
+			// TODO follow or not ?
+		} else {
+			// a file not reigned by JDFS
+			continue
+		}
+	}
+
+	for _, dfPath := range metaList {
+		if size, ok := dataSizes[dfPath]; ok {
+			lb.Add(dfPath, size)
+		}
+	}
+
+	for _, subdir := range subdirList {
+		listJDF(fmt.Sprintf("%s/%s", dir, subdir), lb, metaExt, dataExt)
+	}
+}
+
+func (efs *exportedFileSystem) ListJDF(rootDir string, metaExt, dataExt string) {
+	co := efs.ho.Co()
+	if err := co.FinishRecv(); err != nil {
+		panic(err)
+	}
+
+	var lb vfs.DataFileListBuilder
+	listJDF(rootDir, &lb, metaExt, dataExt)
+	listLen, pathFlatLen, payload := lb.ToSend()
+
+	if err := co.StartSend(); err != nil {
+		panic(err)
+	}
+	if err := co.SendObj(hbi.Repr(listLen)); err != nil {
+		panic(err)
+	}
+	if listLen <= 0 {
+		return
+	}
+	if err := co.SendObj(hbi.Repr(pathFlatLen)); err != nil {
+		panic(err)
+	}
+	i := 0
+	if err := co.SendStream(func() ([]byte, error) {
+		for i < len(payload) {
+			buf := payload[i]
+			i++
+			if len(buf) > 0 {
+				return buf, nil
+			}
+		}
+		return nil, nil
+	}); err != nil {
+		panic(err)
+	}
 }
 
 func (efs *exportedFileSystem) AllocJDF(jdfPath string,
@@ -46,7 +128,7 @@ func (efs *exportedFileSystem) AllocJDF(jdfPath string,
 
 	var handle vfs.DataFileHandle
 	fse := vfs.FsErr(func() (err error) {
-		mfPath := fmt.Sprintf("%s.%s", jdfPath, metaExt)
+		mfPath := jdfPath + metaExt
 		if replaceExisting { // remove existing and ignore error - esp. ENOENT
 			syscall.Unlink(mfPath)
 		}
@@ -54,7 +136,7 @@ func (efs *exportedFileSystem) AllocJDF(jdfPath string,
 			return
 		}
 
-		dfPath := fmt.Sprintf("%s.%s", jdfPath, dataExt)
+		dfPath := jdfPath + dataExt
 		if replaceExisting { // remove existing and ignore error - esp. ENOENT
 			syscall.Unlink(dfPath)
 		}
@@ -95,8 +177,7 @@ func (efs *exportedFileSystem) AllocJDF(jdfPath string,
 	}
 }
 
-func (efs *exportedFileSystem) OpenJDF(jdfPath string,
-	metaExt, dataExt string) {
+func (efs *exportedFileSystem) OpenJDF(jdfPath string, metaExt, dataExt string) {
 	co := efs.ho.Co()
 
 	if err := co.FinishRecv(); err != nil {
@@ -107,13 +188,13 @@ func (efs *exportedFileSystem) OpenJDF(jdfPath string,
 	var dataSize int64
 	var handle vfs.DataFileHandle
 	fse := vfs.FsErr(func() (err error) {
-		mfPath := fmt.Sprintf("%s.%s", jdfPath, metaExt)
+		mfPath := jdfPath + metaExt
 		metaBuf, err = ioutil.ReadFile(mfPath)
 		if err != nil {
 			return
 		}
 
-		dfPath := fmt.Sprintf("%s.%s", jdfPath, dataExt)
+		dfPath := jdfPath + dataExt
 		var f *os.File
 		f, err = os.OpenFile(dfPath, os.O_RDWR, 0644)
 		if err != nil {
@@ -189,7 +270,9 @@ func (efs *exportedFileSystem) ReadJDF(handle vfs.DataFileHandle,
 		bytesRead, err = dfh.f.ReadAt(buf, int64(dataOffset))
 		if err != nil {
 			if err == io.EOF {
-				err = nil // eof is of no interest for jdf consumers
+				// eof is of no interest to ddf consumers,
+				// they should conciously manage size of data files.
+				err = nil
 			} else {
 				glog.Errorf("Error reading data file [%d] [%s]:[%s] with handle %d - %+v",
 					dfh.inode, jdfsRootPath, dfh.f.Name(), handle, err)
