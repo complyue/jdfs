@@ -19,10 +19,11 @@ import (
 func (efs *exportedFileSystem) ListJDF(pathPrefix string,
 	metaExt, dataExt string) {
 
-	searchRoot, err := os.OpenFile(pathPrefix, os.O_RDONLY, 0)
-	if err != nil {
-		panic(err)
-	}
+	// searchRoot, err := os.OpenFile(pathPrefix, os.O_RDONLY, 0)
+	// if err != nil {
+	// 	panic(err)
+	// }
+
 }
 
 func (efs *exportedFileSystem) AllocJDF(jdfPath string,
@@ -75,20 +76,21 @@ func (efs *exportedFileSystem) AllocJDF(jdfPath string,
 		if err != nil {
 			return
 		}
+		return
 	}())
 
-	if err = co.StartSend(); err != nil {
+	if err := co.StartSend(); err != nil {
 		panic(err)
 	}
 
-	if err = co.SendObj(fse.Repr()); err != nil {
+	if err := co.SendObj(fse.Repr()); err != nil {
 		panic(err)
 	}
 	if fse != 0 {
 		return
 	}
 
-	if err = co.SendObj(hbi.Repr(handle)); err != nil {
+	if err := co.SendObj(hbi.Repr(handle)); err != nil {
 		panic(err)
 	}
 }
@@ -102,7 +104,7 @@ func (efs *exportedFileSystem) OpenJDF(jdfPath string,
 	}
 
 	var metaBuf []byte
-	var dataSize uint64
+	var dataSize int64
 	var handle vfs.DataFileHandle
 	fse := vfs.FsErr(func() (err error) {
 		mfPath := fmt.Sprintf("%s.%s", jdfPath, metaExt)
@@ -135,31 +137,31 @@ func (efs *exportedFileSystem) OpenJDF(jdfPath string,
 		return
 	}())
 
-	if err = co.StartSend(); err != nil {
+	if err := co.StartSend(); err != nil {
 		panic(err)
 	}
 
-	if err = co.SendObj(fse.Repr()); err != nil {
+	if err := co.SendObj(fse.Repr()); err != nil {
 		panic(err)
 	}
 	if fse != 0 {
 		return
 	}
 
-	if err = co.SendObj(hbi.Repr(len(metaBuf))); err != nil {
+	if err := co.SendObj(hbi.Repr(len(metaBuf))); err != nil {
 		panic(err)
 	}
 	if len(metaBuf) > 0 {
-		if err = co.SendData(metaBuf); err != nil {
+		if err := co.SendData(metaBuf); err != nil {
 			panic(err)
 		}
 	}
 
-	if err = co.SendObj(hbi.Repr(dataSize)); err != nil {
+	if err := co.SendObj(hbi.Repr(dataSize)); err != nil {
 		panic(err)
 	}
 
-	if err = co.SendObj(hbi.Repr(handle)); err != nil {
+	if err := co.SendObj(hbi.Repr(handle)); err != nil {
 		panic(err)
 	}
 }
@@ -201,6 +203,7 @@ func (efs *exportedFileSystem) ReadJDF(handle vfs.DataFileHandle,
 			glog.Infof("Read %d bytes @%d from data file [%d] [%s]:[%s] with handle %d",
 				bytesRead, dataOffset, dfh.inode, jdfsRootPath, dfh.f.Name(), handle)
 		}
+		return
 	}())
 
 	if err := co.StartSend(); err != nil {
@@ -239,7 +242,7 @@ func (efs *exportedFileSystem) WriteJDF(handle vfs.DataFileHandle,
 	if err != nil {
 		panic(err)
 	}
-	fse := vfs.FsErr(func() {
+	fse := vfs.FsErr(func() (err error) {
 		// do this before the underlying HBI wire released
 		defer efs.dfd.FileHandleOpDone(dfh)
 
@@ -266,7 +269,7 @@ func (efs *exportedFileSystem) WriteJDF(handle vfs.DataFileHandle,
 		panic(err)
 	}
 
-	if err = co.SendObj(fse.Repr()); err != nil {
+	if err := co.SendObj(fse.Repr()); err != nil {
 		panic(err)
 	}
 	if fse != 0 {
@@ -309,7 +312,7 @@ func (efs *exportedFileSystem) ExtendJDF(handle vfs.DataFileHandle,
 		panic(err)
 	}
 
-	if err = co.SendObj(fse.Repr()); err != nil {
+	if err := co.SendObj(fse.Repr()); err != nil {
 		panic(err)
 	}
 	if fse != 0 {
@@ -349,7 +352,7 @@ func (efs *exportedFileSystem) SyncJDF(handle vfs.DataFileHandle) {
 		panic(err)
 	}
 
-	if err = co.SendObj(fse.Repr()); err != nil {
+	if err := co.SendObj(fse.Repr()); err != nil {
 		panic(err)
 	}
 	if fse != 0 {
