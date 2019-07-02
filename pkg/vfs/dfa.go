@@ -79,6 +79,9 @@ func (lb *DataFileListBuilder) PathFlatLen() int {
 
 func (lb *DataFileListBuilder) ToSend() (listLen int, pathFlatLen int, payload [][]byte) {
 	listLen = len(lb.sizes)
+	if listLen <= 0 {
+		return // keep all zeros
+	}
 	pathFlatLen = lb.pathFlatBuf.Len()
 	sizesBytes := int64(listLen) * int64(unsafe.Sizeof(lb.sizes[0]))
 	pathLensBytes := int64(listLen) * int64(unsafe.Sizeof(lb.pathLens[0]))
