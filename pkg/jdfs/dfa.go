@@ -5,6 +5,7 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -128,6 +129,11 @@ func (efs *exportedFileSystem) AllocJDF(jdfPath string,
 
 	var handle vfs.DataFileHandle
 	fse := vfs.FsErr(func() (err error) {
+		// try best to have parent dir exist, but ignore error here,
+		// if parent dir can not be created, file creation will raise
+		// error and will be reported.
+		os.MkdirAll(filepath.Dir(jdfPath), 0750)
+
 		mfPath := jdfPath + metaExt
 		if replaceExisting { // remove existing and ignore error - esp. ENOENT
 			syscall.Unlink(mfPath)
