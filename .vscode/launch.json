@@ -19,7 +19,7 @@
                 "-v=2",
                 "-solo",
                 // "/tmp/jdf"
-                "/Volumes/RamDisk"
+                "/m3c3var"
             ]
         },
         {
@@ -31,8 +31,9 @@
             "env": {},
             "args": [
                 "-v=2",
-                "jdfs://localhost/",
-                "/mnt/jdf/"
+                "jdfs://localhost",
+                // "/mnt/jdf/"
+                "/m3c3/var"
             ]
         }
     ]
