@@ -25,7 +25,7 @@ func listJDF(dir string, lb *vfs.DataFileListBuilder, metaExt, dataExt string) {
 
 	df, err := os.OpenFile(dir, os.O_RDONLY, 0)
 	if err != nil {
-		glog.Errorf("LSDF failed opening dir [%s]:[%s] - %+v", jdfsRootPath, dir, err)
+		glog.Warningf("LSDF failed opening dir [%s]:[%s] - %+v", jdfsRootPath, dir, err)
 		return
 	}
 	childFIs, err := df.Readdir(0)
