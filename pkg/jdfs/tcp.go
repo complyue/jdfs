@@ -31,9 +31,10 @@ func ExportTCP(exportRoot string, servAddr string) (err error) {
 
 	if err = servMethod(servAddr, func() *hbi.HostingEnv {
 		return newServiceEnv(exportRoot)
-	}, func(listener *net.TCPListener) {
+	}, func(listener *net.TCPListener) error {
 		fmt.Fprintf(os.Stderr, "JDFS server %d for [%s] listening: %s\n",
 			os.Getpid(), exportRoot, listener.Addr())
+		return nil
 	}); err != nil {
 		return
 	}

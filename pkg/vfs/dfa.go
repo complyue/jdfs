@@ -1,7 +1,6 @@
 package vfs
 
 import (
-	"bytes"
 	"unsafe"
 )
 
@@ -12,83 +11,60 @@ type DataFileHandle int
 type DataFileList struct {
 	Sizes    []int64
 	PathFlat []byte
-	PathLens []int32
+	PathEpos []uint32
 }
 
 func (dfl *DataFileList) Len() int {
 	return len(dfl.Sizes)
 }
 
-func (dfl *DataFileList) Each(dfcb func(
-	idx int, path string, size int64,
-) error) error {
-	l := len(dfl.Sizes)
-	var pathStart int32
-	for i := 0; i < l; i++ {
-		pathEnd := pathStart + dfl.PathLens[i]
-		path := string(dfl.PathFlat[pathStart:pathEnd])
-		size := dfl.Sizes[i]
-		if err := dfcb(i, path, size); err != nil {
-			return err
-		}
-		pathStart = pathEnd
+func (dfl *DataFileList) Get(i int) (size int64, path string) {
+	size = dfl.Sizes[i]
+	var sp uint32
+	if i > 0 {
+		sp = dfl.PathEpos[i-1]
 	}
-	return nil
-}
-
-func DataFileListToFill(listLen int, pathFlatLen int) (dfl *DataFileList, bufs [][]byte) {
-	dfl = &DataFileList{
-		Sizes:    make([]int64, listLen),
-		PathFlat: make([]byte, pathFlatLen),
-		PathLens: make([]int32, listLen),
-	}
-	sizesBytes := int64(listLen) * int64(unsafe.Sizeof(dfl.Sizes[0]))
-	pathLensBytes := int64(listLen) * int64(unsafe.Sizeof(dfl.PathLens[0]))
-	bufs = [][]byte{
-		(*[maxAllocSize]byte)(unsafe.Pointer(&dfl.Sizes[0]))[0:sizesBytes:sizesBytes],
-		dfl.PathFlat,
-		(*[maxAllocSize]byte)(unsafe.Pointer(&dfl.PathLens[0]))[0:pathLensBytes:pathLensBytes],
-	}
+	ep := dfl.PathEpos[i]
+	path = string(dfl.PathFlat[sp:ep])
 	return
 }
 
-type DataFileListBuilder struct {
-	sizes       []int64
-	pathFlatBuf bytes.Buffer
-	pathLens    []int32
+func (dfl *DataFileList) Add(size int64, path string) {
+	dfl.Sizes = append(dfl.Sizes, size)
+	dfl.PathFlat = append(dfl.PathFlat, path...)
+	dfl.PathEpos = append(dfl.PathEpos, uint32(len(dfl.PathFlat)))
 }
 
-func (lb *DataFileListBuilder) Add(path string, size int64) (err error) {
-	var n int
-	n, err = lb.pathFlatBuf.WriteString(path)
-	if err != nil {
-		return
-	}
-	lb.sizes = append(lb.sizes, size)
-	lb.pathLens = append(lb.pathLens, int32(n))
-	return
-}
-
-func (lb *DataFileListBuilder) Len() int {
-	return len(lb.sizes)
-}
-
-func (lb *DataFileListBuilder) PathFlatLen() int {
-	return lb.pathFlatBuf.Len()
-}
-
-func (lb *DataFileListBuilder) ToSend() (listLen int, pathFlatLen int, payload [][]byte) {
-	listLen = len(lb.sizes)
+func (dfl *DataFileList) ToSend() (listLen int, pathFlatLen int, payload [][]byte) {
+	listLen = len(dfl.Sizes)
 	if listLen <= 0 {
 		return // keep all zeros
 	}
-	pathFlatLen = lb.pathFlatBuf.Len()
-	sizesBytes := int64(listLen) * int64(unsafe.Sizeof(lb.sizes[0]))
-	pathLensBytes := int64(listLen) * int64(unsafe.Sizeof(lb.pathLens[0]))
+	pathFlatLen = len(dfl.PathFlat)
+	sizesBytes := int64(listLen) * int64(unsafe.Sizeof(dfl.Sizes[0]))
+	pathEposBytes := int64(listLen) * int64(unsafe.Sizeof(dfl.PathEpos[0]))
 	payload = [][]byte{
-		(*[maxAllocSize]byte)(unsafe.Pointer(&lb.sizes[0]))[0:sizesBytes:sizesBytes],
-		lb.pathFlatBuf.Bytes(),
-		(*[maxAllocSize]byte)(unsafe.Pointer(&lb.pathLens[0]))[0:pathLensBytes:pathLensBytes],
+		(*[maxAllocSize]byte)(unsafe.Pointer(&dfl.Sizes[0]))[0:sizesBytes:sizesBytes],
+		dfl.PathFlat,
+		(*[maxAllocSize]byte)(unsafe.Pointer(&dfl.PathEpos[0]))[0:pathEposBytes:pathEposBytes],
+	}
+	return
+}
+
+func ToReceiveDataFileList(listLen int, pathFlatLen int) (dfl *DataFileList, payload [][]byte) {
+	dfl = &DataFileList{}
+	if listLen <= 0 {
+		return
+	}
+	dfl.Sizes = make([]int64, listLen)
+	dfl.PathFlat = make([]byte, pathFlatLen)
+	dfl.PathEpos = make([]uint32, listLen)
+	sizesBytes := int64(listLen) * int64(unsafe.Sizeof(dfl.Sizes[0]))
+	pathEposBytes := int64(listLen) * int64(unsafe.Sizeof(dfl.PathEpos[0]))
+	payload = [][]byte{
+		(*[maxAllocSize]byte)(unsafe.Pointer(&dfl.Sizes[0]))[0:sizesBytes:sizesBytes],
+		dfl.PathFlat,
+		(*[maxAllocSize]byte)(unsafe.Pointer(&dfl.PathEpos[0]))[0:pathEposBytes:pathEposBytes],
 	}
 	return
 }

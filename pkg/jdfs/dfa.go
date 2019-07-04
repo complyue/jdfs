@@ -18,7 +18,7 @@ import (
 
 // direct data file access methods
 
-func listJDF(dir string, lb *vfs.DataFileListBuilder, metaExt, dataExt string) {
+func listJDF(dir string, dfl *vfs.DataFileList, metaExt, dataExt string) {
 	if len(dir) <= 0 {
 		dir = "."
 	}
@@ -69,7 +69,7 @@ func listJDF(dir string, lb *vfs.DataFileListBuilder, metaExt, dataExt string) {
 
 	for _, dfPath := range metaList {
 		if size, ok := dataSizes[dfPath]; ok {
-			lb.Add(dfPath, size)
+			dfl.Add(size, dfPath)
 		}
 	}
 
@@ -78,7 +78,7 @@ func listJDF(dir string, lb *vfs.DataFileListBuilder, metaExt, dataExt string) {
 		if dir != "." {
 			dfPath = fmt.Sprintf("%s/%s", dir, subdir)
 		}
-		listJDF(dfPath, lb, metaExt, dataExt)
+		listJDF(dfPath, dfl, metaExt, dataExt)
 	}
 }
 
@@ -88,9 +88,9 @@ func (efs *exportedFileSystem) ListJDF(rootDir string, metaExt, dataExt string) 
 		panic(err)
 	}
 
-	var lb vfs.DataFileListBuilder
-	listJDF(rootDir, &lb, metaExt, dataExt)
-	listLen, pathFlatLen, payload := lb.ToSend()
+	var dfl vfs.DataFileList
+	listJDF(rootDir, &dfl, metaExt, dataExt)
+	listLen, pathFlatLen, payload := dfl.ToSend()
 
 	if err := co.StartSend(); err != nil {
 		panic(err)
