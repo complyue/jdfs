@@ -46,10 +46,16 @@ func listJDF(dir string, lb *vfs.DataFileListBuilder, metaExt, dataExt string) {
 		} else if childFI.Mode().IsRegular() {
 			// a regular file
 			if strings.HasSuffix(fn, metaExt) {
-				dfPath := dir + "/" + fn[:len(fn)-len(metaExt)]
+				dfPath := fn[:len(fn)-len(metaExt)]
+				if dir != "." {
+					dfPath = dir + "/" + dfPath
+				}
 				metaList = append(metaList, dfPath)
 			} else if strings.HasSuffix(fn, dataExt) {
-				dfPath := dir + "/" + fn[:len(fn)-len(dataExt)]
+				dfPath := fn[:len(fn)-len(dataExt)]
+				if dir != "." {
+					dfPath = dir + "/" + dfPath
+				}
 				dataSizes[dfPath] = childFI.Size()
 			}
 		} else if (childFI.Mode() & os.ModeSymlink) != 0 {
@@ -68,7 +74,11 @@ func listJDF(dir string, lb *vfs.DataFileListBuilder, metaExt, dataExt string) {
 	}
 
 	for _, subdir := range subdirList {
-		listJDF(fmt.Sprintf("%s/%s", dir, subdir), lb, metaExt, dataExt)
+		dfPath := subdir
+		if dir != "." {
+			dfPath = fmt.Sprintf("%s/%s", dir, subdir)
+		}
+		listJDF(dfPath, lb, metaExt, dataExt)
 	}
 }
 
