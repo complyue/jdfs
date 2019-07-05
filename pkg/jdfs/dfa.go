@@ -11,6 +11,7 @@ import (
 
 	"github.com/complyue/hbi"
 
+	"github.com/complyue/jdfs/pkg/errors"
 	"github.com/complyue/jdfs/pkg/vfs"
 
 	"github.com/golang/glog"
@@ -119,12 +120,16 @@ func (efs *exportedFileSystem) ListJDF(rootDir string, metaExt, dataExt string) 
 	}
 }
 
-func (efs *exportedFileSystem) AllocJDF(jdfPath string,
-	replaceExisting bool,
-	metaExt, dataExt string, metaSize int32, dataSize uintptr) {
+func (efs *exportedFileSystem) AllocJDF(jdfPath string, replaceExisting bool,
+	metaExt, dataExt string, headerSize int, metaSize int32, dfSize uintptr) {
 	co := efs.ho.Co()
 
-	var metaBuf []byte
+	var hdrBuf, metaBuf []byte
+	hdrBuf = efs.bufPool.Get(headerSize)
+	defer efs.bufPool.Return(hdrBuf)
+	if err := co.RecvData(hdrBuf); err != nil {
+		panic(err)
+	}
 	if metaSize > 0 {
 		metaBuf = efs.bufPool.Get(int(metaSize))
 		defer efs.bufPool.Return(metaBuf)
@@ -166,7 +171,14 @@ func (efs *exportedFileSystem) AllocJDF(jdfPath string,
 				f.Close()
 			}
 		}()
-		if err = syscall.Ftruncate(int(f.Fd()), int64(dataSize)); err != nil {
+		if err = syscall.Ftruncate(int(f.Fd()), int64(dfSize)); err != nil {
+			return
+		}
+		var bytesWritten int
+		if bytesWritten, err = f.WriteAt(hdrBuf, 0); err != nil {
+			return
+		} else if bytesWritten != headerSize {
+			err = errors.Errorf("Partial header [%d/%d] written!", bytesWritten, headerSize)
 			return
 		}
 
@@ -193,15 +205,17 @@ func (efs *exportedFileSystem) AllocJDF(jdfPath string,
 	}
 }
 
-func (efs *exportedFileSystem) OpenJDF(jdfPath string, metaExt, dataExt string) {
+func (efs *exportedFileSystem) OpenJDF(jdfPath string, headerBytes int,
+	metaExt, dataExt string) {
 	co := efs.ho.Co()
 
 	if err := co.FinishRecv(); err != nil {
 		panic(err)
 	}
 
+	var hdrBuf []byte
 	var metaBuf []byte
-	var dataSize int64
+	var dfSize int64
 	var handle vfs.DataFileHandle
 	fse := vfs.FsErr(func() (err error) {
 		mfPath := jdfPath + metaExt
@@ -221,8 +235,27 @@ func (efs *exportedFileSystem) OpenJDF(jdfPath string, metaExt, dataExt string) 
 				f.Close()
 			}
 		}()
+		var fi os.FileInfo
+		if fi, err = f.Stat(); err != nil {
+			return
+		}
+		im := fi2im(dfPath, fi)
 
-		dataSize, err = f.Seek(0, 2)
+		if headerBytes > 0 {
+			hdrBuf = efs.bufPool.Get(headerBytes)
+			defer efs.bufPool.Return(hdrBuf)
+			var hdrReadBytes int
+			if hdrReadBytes, err = f.ReadAt(hdrBuf, 0); err != nil {
+				glog.Errorf("Error reading header of data file [%d] [%s]:[%s] with handle %d - %+v",
+					im.inode, jdfsRootPath, f.Name(), handle, err)
+				return
+			} else if hdrReadBytes != headerBytes {
+				glog.Warningf("Partial header [%d/%d] read from data file [%d] [%s]:[%s] with handle %d",
+					hdrReadBytes, headerBytes, im.inode, jdfsRootPath, f.Name(), handle)
+			}
+		}
+
+		dfSize, err = f.Seek(0, 2)
 		if err != nil {
 			return
 		}
@@ -245,6 +278,12 @@ func (efs *exportedFileSystem) OpenJDF(jdfPath string, metaExt, dataExt string) 
 		return
 	}
 
+	if headerBytes > 0 {
+		if err := co.SendData(hdrBuf); err != nil {
+			panic(err)
+		}
+	}
+
 	if err := co.SendObj(hbi.Repr(len(metaBuf))); err != nil {
 		panic(err)
 	}
@@ -254,7 +293,7 @@ func (efs *exportedFileSystem) OpenJDF(jdfPath string, metaExt, dataExt string) 
 		}
 	}
 
-	if err := co.SendObj(hbi.Repr(dataSize)); err != nil {
+	if err := co.SendObj(hbi.Repr(dfSize)); err != nil {
 		panic(err)
 	}
 
@@ -378,7 +417,8 @@ func (efs *exportedFileSystem) WriteJDF(handle vfs.DataFileHandle,
 	// todo send bytesWritten back ?
 }
 
-func (efs *exportedFileSystem) ExtendJDF(handle vfs.DataFileHandle, dataSize uintptr) {
+func (efs *exportedFileSystem) ExtendJDF(handle vfs.DataFileHandle,
+	headerBytes int, newSize uintptr) {
 	co := efs.ho.Co()
 
 	// do this before the underlying HBI wire released
@@ -386,6 +426,7 @@ func (efs *exportedFileSystem) ExtendJDF(handle vfs.DataFileHandle, dataSize uin
 	if err != nil {
 		panic(err)
 	}
+	var hdrBuf []byte
 	fse := vfs.FsErr(func() (err error) {
 		defer efs.dfd.FileHandleOpDone(dfh)
 
@@ -393,15 +434,29 @@ func (efs *exportedFileSystem) ExtendJDF(handle vfs.DataFileHandle, dataSize uin
 			panic(err)
 		}
 
-		if err = syscall.Ftruncate(int(dfh.f.Fd()), int64(dataSize)); err != nil {
+		if headerBytes > 0 {
+			hdrBuf = efs.bufPool.Get(headerBytes)
+			defer efs.bufPool.Return(hdrBuf)
+			var hdrReadBytes int
+			if hdrReadBytes, err = dfh.f.ReadAt(hdrBuf, 0); err != nil {
+				glog.Errorf("Error reading header of data file [%d] [%s]:[%s] with handle %d - %+v",
+					dfh.inode, jdfsRootPath, dfh.f.Name(), handle, err)
+				return
+			} else if hdrReadBytes != headerBytes {
+				glog.Warningf("Partial header [%d/%d] read from data file [%d] [%s]:[%s] with handle %d",
+					hdrReadBytes, headerBytes, dfh.inode, jdfsRootPath, dfh.f.Name(), handle)
+			}
+		}
+
+		if err = syscall.Ftruncate(int(dfh.f.Fd()), int64(newSize)); err != nil {
 			glog.Errorf("Error extending data file [%d] [%s]:[%s] to [%d] with handle %d - %+v",
-				dfh.inode, jdfsRootPath, dfh.f.Name(), dataSize, handle, err)
+				dfh.inode, jdfsRootPath, dfh.f.Name(), newSize, handle, err)
 			return
 		}
 
 		if glog.V(2) {
 			glog.Infof("Extended data file [%d] [%s]:[%s] to [%d] with handle %d", dfh.inode,
-				jdfsRootPath, dfh.f.Name(), dataSize, handle)
+				jdfsRootPath, dfh.f.Name(), newSize, handle)
 		}
 		return
 	}())
@@ -415,6 +470,12 @@ func (efs *exportedFileSystem) ExtendJDF(handle vfs.DataFileHandle, dataSize uin
 	}
 	if fse != 0 {
 		return
+	}
+
+	if headerBytes > 0 {
+		if err = co.SendData(hdrBuf); err != nil {
+			panic(err)
+		}
 	}
 }
 
