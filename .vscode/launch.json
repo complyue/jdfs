@@ -16,7 +16,7 @@
             "program": "${workspaceFolder}/cmd/jdfs",
             "env": {},
             "args": [
-                "-v=2",
+                // "-v=2",
                 "-solo",
                 // "/tmp/jdf"
                 "/m3c3var"
