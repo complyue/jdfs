@@ -196,7 +196,7 @@ func (fs *fileSystem) connReset(
 
 		// initiate mount
 		var co *hbi.PoCo
-		co, err = po.NewCo()
+		co, err = po.NewCo(nil)
 		if err != nil {
 			return
 		}
@@ -247,7 +247,7 @@ func (fs *fileSystem) InvalidateEntry(
 func (fs *fileSystem) StatFS(
 	ctx context.Context,
 	op *vfs.StatFSOp) (err error) {
-	co, err := fs.po.NewCo()
+	co, err := fs.po.NewCo(nil)
 	if err != nil {
 		panic(err)
 	}
@@ -268,7 +268,7 @@ func (fs *fileSystem) StatFS(
 func (fs *fileSystem) LookUpInode(
 	ctx context.Context,
 	op *vfs.LookUpInodeOp) (err error) {
-	co, err := fs.po.NewCo()
+	co, err := fs.po.NewCo(nil)
 	if err != nil {
 		panic(err)
 	}
@@ -304,7 +304,7 @@ LookUpInode(%#v, %#v)
 func (fs *fileSystem) GetInodeAttributes(
 	ctx context.Context,
 	op *vfs.GetInodeAttributesOp) (err error) {
-	co, err := fs.po.NewCo()
+	co, err := fs.po.NewCo(nil)
 	if err != nil {
 		panic(err)
 	}
@@ -341,7 +341,7 @@ GetInodeAttributes(%#v)
 func (fs *fileSystem) SetInodeAttributes(
 	ctx context.Context,
 	op *vfs.SetInodeAttributesOp) (err error) {
-	co, err := fs.po.NewCo()
+	co, err := fs.po.NewCo(nil)
 	if err != nil {
 		panic(err)
 	}
@@ -397,7 +397,7 @@ SetInodeAttributes(%#v,%#v, %#v, %#v,%#v, %#v, %#v)
 func (fs *fileSystem) ForgetInode(
 	ctx context.Context,
 	op *vfs.ForgetInodeOp) (err error) {
-	co, err := fs.po.NewCo()
+	co, err := fs.po.NewCo(nil)
 	if err != nil {
 		panic(err)
 	}
@@ -415,7 +415,7 @@ ForgetInode(%#v, %#v)
 func (fs *fileSystem) MkDir(
 	ctx context.Context,
 	op *vfs.MkDirOp) (err error) {
-	co, err := fs.po.NewCo()
+	co, err := fs.po.NewCo(nil)
 	if err != nil {
 		panic(err)
 	}
@@ -459,7 +459,7 @@ func (fs *fileSystem) MkNode(
 func (fs *fileSystem) CreateFile(
 	ctx context.Context,
 	op *vfs.CreateFileOp) (err error) {
-	co, err := fs.po.NewCo()
+	co, err := fs.po.NewCo(nil)
 	if err != nil {
 		panic(err)
 	}
@@ -506,7 +506,7 @@ CreateFile(%#v, %#v, %#v)
 func (fs *fileSystem) CreateSymlink(
 	ctx context.Context,
 	op *vfs.CreateSymlinkOp) (err error) {
-	co, err := fs.po.NewCo()
+	co, err := fs.po.NewCo(nil)
 	if err != nil {
 		panic(err)
 	}
@@ -543,7 +543,7 @@ CreateSymlink(%#v, %#v, %#v)
 func (fs *fileSystem) CreateLink(
 	ctx context.Context,
 	op *vfs.CreateLinkOp) (err error) {
-	co, err := fs.po.NewCo()
+	co, err := fs.po.NewCo(nil)
 	if err != nil {
 		panic(err)
 	}
@@ -580,7 +580,7 @@ CreateLink(%#v, %#v, %#v)
 func (fs *fileSystem) Rename(
 	ctx context.Context,
 	op *vfs.RenameOp) (err error) {
-	co, err := fs.po.NewCo()
+	co, err := fs.po.NewCo(nil)
 	if err != nil {
 		panic(err)
 	}
@@ -610,7 +610,7 @@ Rename(%#v, %#v, %#v, %#v)
 func (fs *fileSystem) RmDir(
 	ctx context.Context,
 	op *vfs.RmDirOp) (err error) {
-	co, err := fs.po.NewCo()
+	co, err := fs.po.NewCo(nil)
 	if err != nil {
 		panic(err)
 	}
@@ -640,7 +640,7 @@ RmDir(%#v, %#v)
 func (fs *fileSystem) Unlink(
 	ctx context.Context,
 	op *vfs.UnlinkOp) (err error) {
-	co, err := fs.po.NewCo()
+	co, err := fs.po.NewCo(nil)
 	if err != nil {
 		panic(err)
 	}
@@ -670,7 +670,7 @@ Unlink(%#v, %#v)
 func (fs *fileSystem) OpenDir(
 	ctx context.Context,
 	op *vfs.OpenDirOp) (err error) {
-	co, err := fs.po.NewCo()
+	co, err := fs.po.NewCo(nil)
 	if err != nil {
 		panic(err)
 	}
@@ -710,7 +710,7 @@ OpenDir(%#v)
 func (fs *fileSystem) ReadDir(
 	ctx context.Context,
 	op *vfs.ReadDirOp) (err error) {
-	co, err := fs.po.NewCo()
+	co, err := fs.po.NewCo(nil)
 	if err != nil {
 		panic(err)
 	}
@@ -755,7 +755,7 @@ ReadDir(%#v, %#v, %#v, %#v)
 func (fs *fileSystem) ReleaseDirHandle(
 	ctx context.Context,
 	op *vfs.ReleaseDirHandleOp) (err error) {
-	co, err := fs.po.NewCo()
+	co, err := fs.po.NewCo(nil)
 	if err != nil {
 		panic(err)
 	}
@@ -773,7 +773,7 @@ ReleaseDirHandle(%#v)
 func (fs *fileSystem) OpenFile(
 	ctx context.Context,
 	op *vfs.OpenFileOp) (err error) {
-	co, err := fs.po.NewCo()
+	co, err := fs.po.NewCo(nil)
 	if err != nil {
 		panic(err)
 	}
@@ -820,7 +820,7 @@ OpenFile(%#v, %#v, %#v)
 func (fs *fileSystem) ReadFile(
 	ctx context.Context,
 	op *vfs.ReadFileOp) (err error) {
-	co, err := fs.po.NewCo()
+	co, err := fs.po.NewCo(nil)
 	if err != nil {
 		panic(err)
 	}
@@ -877,7 +877,7 @@ ReadFile(%#v, %#v, %#v, %#v)
 func (fs *fileSystem) WriteFile(
 	ctx context.Context,
 	op *vfs.WriteFileOp) (err error) {
-	co, err := fs.po.NewCo()
+	co, err := fs.po.NewCo(nil)
 	if err != nil {
 		panic(err)
 	}
@@ -910,7 +910,7 @@ WriteFile(%#v, %#v, %#v, %#v)
 func (fs *fileSystem) SyncFile(
 	ctx context.Context,
 	op *vfs.SyncFileOp) (err error) {
-	co, err := fs.po.NewCo()
+	co, err := fs.po.NewCo(nil)
 	if err != nil {
 		panic(err)
 	}
@@ -949,7 +949,7 @@ func (fs *fileSystem) FlushFile(
 func (fs *fileSystem) ReleaseFileHandle(
 	ctx context.Context,
 	op *vfs.ReleaseFileHandleOp) (err error) {
-	co, err := fs.po.NewCo()
+	co, err := fs.po.NewCo(nil)
 	if err != nil {
 		panic(err)
 	}
@@ -967,7 +967,7 @@ ReleaseFileHandle(%#v)
 func (fs *fileSystem) ReadSymlink(
 	ctx context.Context,
 	op *vfs.ReadSymlinkOp) (err error) {
-	co, err := fs.po.NewCo()
+	co, err := fs.po.NewCo(nil)
 	if err != nil {
 		panic(err)
 	}
@@ -1007,7 +1007,7 @@ ReadSymlink(%#v)
 func (fs *fileSystem) RemoveXattr(
 	ctx context.Context,
 	op *vfs.RemoveXattrOp) (err error) {
-	co, err := fs.po.NewCo()
+	co, err := fs.po.NewCo(nil)
 	if err != nil {
 		panic(err)
 	}
@@ -1037,7 +1037,7 @@ RemoveXattr(%#v, %#v)
 func (fs *fileSystem) GetXattr(
 	ctx context.Context,
 	op *vfs.GetXattrOp) (err error) {
-	co, err := fs.po.NewCo()
+	co, err := fs.po.NewCo(nil)
 	if err != nil {
 		panic(err)
 	}
@@ -1084,7 +1084,7 @@ GetXattr(%#v, %#v, %#v)
 func (fs *fileSystem) ListXattr(
 	ctx context.Context,
 	op *vfs.ListXattrOp) (err error) {
-	co, err := fs.po.NewCo()
+	co, err := fs.po.NewCo(nil)
 	if err != nil {
 		panic(err)
 	}
@@ -1133,7 +1133,7 @@ func (fs *fileSystem) SetXattr(
 	op *vfs.SetXattrOp) (err error) {
 	// allow no space consumption
 	err = syscall.ENOSPC
-	co, err := fs.po.NewCo()
+	co, err := fs.po.NewCo(nil)
 	if err != nil {
 		panic(err)
 	}
