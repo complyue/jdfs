@@ -119,13 +119,15 @@ func (s *fileSystemServer) handleOp(
 		err = s.fs.FlushFile(ctx, typed)
 
 		postJob = func() error {
-			// FUSE kernel is not smart enough to infer file size increasing from write operations.
-			// we invalidate attrs cache on flush (i.e. handle close), so the kernel knows it needs
-			// to contact jdfs for new file size. if kernel not to update the cached file size,
-			// programs like `git clone` won't work.
+			// we use FUSE's writeback cache mode to preserve kernel page cache as much as possible,
+			// but FUSE doesn't seem to always update file size in inode attrs in time, thus we
+			// invalidate attrs cache on flush (i.e. handle close), so the kernel will refresh
+			// inode attrs from jdfs, where file size should have been updated properly.
 			//
-			// use negative offset to avoid invalidation of page cache, both macOS and Linux drop
-			// page cache even with offset==0 && len==0
+			// programs like `git clone` won't work without this hack.
+			//
+			// note: use negative offset to avoid invalidation of page cache, both macOS and Linux
+			// drop page cache even with offset==0 && len==0
 			// https://github.com/torvalds/linux/blob/4ae004a9bca8bef118c2b4e76ee31c7df4514f18/fs/fuse/inode.c#L344
 			if err := c.InvalidateNode(typed.Inode, -1, 0); err != nil && err != syscall.ENOENT {
 				return errors.Wrapf(err, "Unexpected fuse kernel error on inode invalidation [%T]", err)
