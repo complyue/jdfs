@@ -375,10 +375,10 @@ func (icd *icFSD) getInode(inode vfs.InodeID) *icInode {
 	return ici
 }
 
-// GetInode returns a snapshot of in-core inode record, and the pointer to one of
+// GetInode returns a snapshot of in-core inode record, and the snapshot of one of
 // the file handles if any held open, with writable ones prefered over readonly ones.
 //
-// if a non-nil file handle is returned, its operation counter will be increased by
+// if gotHandle returned is true, the handle's operation counter will be increased by
 // `incOpc`. a file handle's opc (a sync.WaitGroup) will be waited before actually
 // releasing the handle, to make sure its pending operations always see the handle
 // valid.
@@ -386,7 +386,7 @@ func (icd *icFSD) getInode(inode vfs.InodeID) *icInode {
 // the caller is responsible to call icd.FileHandleOpDone(icfh) the exact number of times as each
 // operation done.
 func (icd *icFSD) GetInode(incRef int, inode vfs.InodeID, incOpc int) (
-	ici icInode, icfh *icfHandle, ok bool) {
+	ici icInode, ok bool, icfh icfHandle, gotHandle bool) {
 	icd.mu.Lock()
 	defer icd.mu.Unlock()
 
@@ -396,25 +396,26 @@ func (icd *icFSD) GetInode(incRef int, inode vfs.InodeID, incOpc int) (
 	}
 
 	icip.refcnt += incRef
+	ici, ok = *icip, true
 
 	if incOpc > 0 {
 		var tmpFH *icfHandle
 		for hsi := icip.fhHead; hsi > 0; hsi = tmpFH.nextFH {
 			tmpFH = &icd.fileHandles[hsi]
 			if tmpFH.writable { // a writable handle is most preferable
-				icfh = tmpFH
+				icfh = *tmpFH
+				gotHandle = true
 				break
 			}
-			if icfh == nil {
-				icfh = tmpFH // a readonly handle is fallback if none writable open
+			if !gotHandle {
+				icfh = *tmpFH // a readonly handle is fallback if none writable open
+				gotHandle = true
 			}
 		}
-		if icfh != nil {
+		if gotHandle {
 			icfh.opc.Add(incOpc) // increase operation counter with mu locked
 		}
 	}
-
-	ici, ok = *icip, true
 
 	return
 }
@@ -555,16 +556,15 @@ func (icd *icFSD) CreateFileHandle(inode vfs.InodeID, inoF *os.File, writable bo
 	return
 }
 
-func (icd *icFSD) FileHandleOpDone(icfh *icfHandle) {
+func (icd *icFSD) FileHandleOpDone(icfh icfHandle) {
 	icfh.opc.Done()
 }
 
-func (icd *icFSD) GetFileHandle(inode vfs.InodeID, handle int, incOpc int) (icfh *icfHandle, err error) {
+func (icd *icFSD) GetFileHandle(inode vfs.InodeID, handle int, incOpc int) (icfh icfHandle, err error) {
 	icd.mu.Lock()
 	defer icd.mu.Unlock()
 
-	// the opc field (as a WaitGroup) can not be copied, must return a pointer
-	icfh = &icd.fileHandles[handle]
+	icfh = icd.fileHandles[handle]
 
 	if icfh.isi <= 0 { // isi 0 is root dir, not possible to be an opened file
 		err = vfs.ENOENT
@@ -587,22 +587,23 @@ func (icd *icFSD) GetFileHandle(inode vfs.InodeID, handle int, incOpc int) (icfh
 }
 
 func (icd *icFSD) ReleaseFileHandle(handle int) (inode vfs.InodeID, inoF *os.File) {
-	var icfh *icfHandle
+	var icfh icfHandle
 	var isi int
 
 	func() {
 		icd.mu.Lock()
 		defer icd.mu.Unlock()
 
-		icfh = &icd.fileHandles[handle]
+		icfh = icd.fileHandles[handle]
 		isi = icfh.isi
+		inode, inoF = icfh.inode, icfh.f
 
 		if isi <= 0 { // isi 0 is root dir, not possible to be an opened file
 			glog.Fatal("releasing non-existing file handle ?!")
 		}
 
 		if glog.V(2) {
-			glog.Infof("FH releasing file handle %d for [%d] [%s]:[%s]", handle, inode,
+			glog.Infof("FH release wait file handle %d for [%d] [%s]:[%s]", handle, inode,
 				jdfsRootPath, inoF.Name())
 		}
 	}()
@@ -619,13 +620,12 @@ func (icd *icFSD) ReleaseFileHandle(handle int) (inode vfs.InodeID, inoF *os.Fil
 		defer icd.mu.Unlock()
 
 		// locked icd.mu again, check we are still good
-		if icfh.isi != isi { // released otherwise ?!
-			glog.Fatalf("FH [%v] isi changed [%v] => [%v] ?!", handle, isi, icfh.isi)
+		icfh = icd.fileHandles[handle]
+		if icfh.isi != isi || icfh.inode != inode || icfh.f != inoF {
+			glog.Fatalf("FH [%v] changed %v#[%v](%v) => %v#[%v](%v) ?!",
+				handle, isi, inode, inoF, icfh.isi, icfh.inode, icfh.f)
 			return
 		}
-
-		// grab handle data into return values before it gets cleared
-		inode, inoF = icfh.inode, icfh.f
 
 		// remove this handle from it's inode's file handle list
 		if icfh.nextFH > 0 {
@@ -639,9 +639,14 @@ func (icd *icFSD) ReleaseFileHandle(handle int) (inode vfs.InodeID, inoF *os.Fil
 		}
 
 		// fill fields with zero values
-		*icfh = icfHandle{}
+		icd.fileHandles[handle] = icfHandle{}
 
 		icd.freeFHIdxs = append(icd.freeFHIdxs, handle)
+
+		if glog.V(2) {
+			glog.Infof("FH release ready file handle %d for [%d] [%s]:[%s]", handle, inode,
+				jdfsRootPath, inoF.Name())
+		}
 	}()
 
 	return

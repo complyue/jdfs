@@ -92,16 +92,16 @@ func (dfd *icDFD) CreateFileHandle(jdfPath, metaExt, dataExt string, f *os.File)
 	return
 }
 
-func (dfd *icDFD) FileHandleOpDone(icfh *dfHandle) {
+func (dfd *icDFD) FileHandleOpDone(icfh dfHandle) {
 	icfh.opc.Done()
 }
 
-func (dfd *icDFD) GetFileHandle(handle vfs.DataFileHandle, incOpc int) (icfh *dfHandle, err error) {
+func (dfd *icDFD) GetFileHandle(handle vfs.DataFileHandle, incOpc int) (icfh dfHandle, err error) {
 	dfd.mu.Lock()
 	defer dfd.mu.Unlock()
 
 	// the opc field (as a WaitGroup) can not be copied, must return a pointer
-	icfh = &dfd.fileHandles[handle]
+	icfh = dfd.fileHandles[handle]
 
 	if incOpc > 0 {
 		icfh.opc.Add(incOpc) // increase operation counter with mu locked
@@ -111,26 +111,46 @@ func (dfd *icDFD) GetFileHandle(handle vfs.DataFileHandle, incOpc int) (icfh *df
 }
 
 func (dfd *icDFD) ReleaseFileHandle(handle vfs.DataFileHandle) (inode vfs.InodeID, inoF *os.File) {
-	dfd.mu.Lock()
-	defer dfd.mu.Unlock()
+	var icfh dfHandle
 
-	icfh := &dfd.fileHandles[handle]
+	func() {
+		dfd.mu.Lock()
+		defer dfd.mu.Unlock()
 
-	// grab handle data into return values before it gets cleared
-	inode, inoF = icfh.inode, icfh.f
+		icfh = dfd.fileHandles[handle]
+		inode, inoF = icfh.inode, icfh.f
 
-	if glog.V(2) {
-		glog.Infof("DFH releasing data file handle %d for [%d] [%s]:[%s]", handle, inode,
-			jdfsRootPath, inoF.Name())
-	}
+		if glog.V(2) {
+			glog.Infof("DFH release wait data file handle %d for [%d] [%s]:[%s]", handle, inode,
+				jdfsRootPath, inoF.Name())
+		}
+	}()
 
 	// wait all operations done before closing the underlying file, or they'll fail
 	icfh.opc.Wait()
 
-	// fill fields with zero values
-	*icfh = dfHandle{}
+	func() {
+		dfd.mu.Lock()
+		defer dfd.mu.Unlock()
 
-	dfd.freeFHIdxs = append(dfd.freeFHIdxs, int(handle))
+		// locked dfd.mu again, check we are still good
+		icfh = dfd.fileHandles[handle]
+		if icfh.inode != inode || icfh.f != inoF {
+			glog.Fatalf("DFH [%v] changed [%v](%v) => [%v](%v) ?!",
+				handle, inode, inoF, icfh.inode, icfh.f)
+			return
+		}
+
+		// fill fields with zero values
+		dfd.fileHandles[handle] = dfHandle{}
+
+		dfd.freeFHIdxs = append(dfd.freeFHIdxs, int(handle))
+
+		if glog.V(2) {
+			glog.Infof("DFH release ready data file handle %d for [%d] [%s]:[%s]", handle, inode,
+				jdfsRootPath, inoF.Name())
+		}
+	}()
 
 	return
 }

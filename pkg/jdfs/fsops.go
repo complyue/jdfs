@@ -28,7 +28,7 @@ func (im iMeta) childPath(name string) string {
 	return name
 }
 
-func statFileHandle(icfh *icfHandle) (inoM iMeta, err error) {
+func statFileHandle(icfh icfHandle) (inoM iMeta, err error) {
 	var inoFI os.FileInfo
 	jdfPath := icfh.f.Name()
 	if inoFI, err = icfh.f.Stat(); err != nil {

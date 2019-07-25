@@ -522,26 +522,25 @@ func (efs *exportedFileSystem) SyncJDF(handle vfs.DataFileHandle) {
 func (efs *exportedFileSystem) CloseJDF(handle vfs.DataFileHandle) {
 	co := efs.ho.Co()
 
-	// do this before the underlying HBI wire released
+	// don't let file handle releasing hog the wire
+	if err := co.FinishRecv(); err != nil {
+		panic(err)
+	}
+
 	inode, f := efs.dfd.ReleaseFileHandle(handle)
 	if f == nil {
 		glog.Fatal("no file pointer from released file handle ?!")
+		return
 	}
 
-	defer func() { // don't leak f on FinishRecv() error
-		dfPath := f.Name()
-		if err := f.Close(); err != nil {
-			glog.Errorf("Error on closing jdfs data file [%s]:[%s] - %+v",
-				jdfsRootPath, dfPath, err)
-		}
+	dfPath := f.Name()
+	if err := f.Close(); err != nil {
+		glog.Errorf("Error on closing jdfs data file [%s]:[%s] - %+v",
+			jdfsRootPath, dfPath, err)
+	}
 
-		if glog.V(2) {
-			glog.Infof("DREL data file handle %d released for file [%d] [%s]:[%s]",
-				handle, inode, jdfsRootPath, dfPath)
-		}
-	}()
-
-	if err := co.FinishRecv(); err != nil {
-		panic(err)
+	if glog.V(2) {
+		glog.Infof("DREL data file handle %d released for file [%d] [%s]:[%s]",
+			handle, inode, jdfsRootPath, dfPath)
 	}
 }
