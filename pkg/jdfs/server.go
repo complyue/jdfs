@@ -1378,29 +1378,26 @@ func (efs *exportedFileSystem) SyncFile(inode vfs.InodeID, handle int) {
 func (efs *exportedFileSystem) ReleaseFileHandle(handle int) {
 	co := efs.ho.Co()
 
-	// do this before the underlying HBI wire released
+	// don't let file handle releasing hog the wire
+	if err := co.FinishRecv(); err != nil {
+		panic(err)
+	}
+
 	inode, f := efs.icd.ReleaseFileHandle(handle)
 	if f == nil {
 		glog.Fatal("no file pointer from released file handle ?!")
 	}
 
-	defer func() { // don't leak f on FinishRecv() error
-		jdfPath := f.Name()
-		if err := f.Close(); err != nil {
-			glog.Errorf("Error on closing jdfs file [%s]:[%s] - %+v",
-				jdfsRootPath, jdfPath, err)
-		}
-
-		if glog.V(2) {
-			glog.Infof("REL file handle %d released for file [%d] [%s]:[%s]", handle, inode,
-				jdfsRootPath, jdfPath)
-		}
-	}()
-
-	if err := co.FinishRecv(); err != nil {
-		panic(err)
+	jdfPath := f.Name()
+	if err := f.Close(); err != nil {
+		glog.Errorf("Error on closing jdfs file [%s]:[%s] - %+v",
+			jdfsRootPath, jdfPath, err)
 	}
 
+	if glog.V(2) {
+		glog.Infof("REL file handle %d released for file [%d] [%s]:[%s]", handle, inode,
+			jdfsRootPath, jdfPath)
+	}
 }
 
 func (efs *exportedFileSystem) ReadSymlink(inode vfs.InodeID) {

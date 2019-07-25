@@ -587,41 +587,62 @@ func (icd *icFSD) GetFileHandle(inode vfs.InodeID, handle int, incOpc int) (icfh
 }
 
 func (icd *icFSD) ReleaseFileHandle(handle int) (inode vfs.InodeID, inoF *os.File) {
-	icd.mu.Lock()
-	defer icd.mu.Unlock()
+	var icfh *icfHandle
+	var isi int
 
-	icfh := &icd.fileHandles[handle]
+	func() {
+		icd.mu.Lock()
+		defer icd.mu.Unlock()
 
-	if icfh.isi <= 0 { // isi 0 is root dir, not possible to be an opened file
-		glog.Fatal("releasing non-existing file handle ?!")
-	}
+		icfh = &icd.fileHandles[handle]
+		isi = icfh.isi
 
-	// grab handle data into return values before it gets cleared
-	inode, inoF = icfh.inode, icfh.f
+		if isi <= 0 { // isi 0 is root dir, not possible to be an opened file
+			glog.Fatal("releasing non-existing file handle ?!")
+		}
 
-	if glog.V(2) {
-		glog.Infof("FH releasing file handle %d for [%d] [%s]:[%s]", handle, inode,
-			jdfsRootPath, inoF.Name())
-	}
+		if glog.V(2) {
+			glog.Infof("FH releasing file handle %d for [%d] [%s]:[%s]", handle, inode,
+				jdfsRootPath, inoF.Name())
+		}
+	}()
 
 	// wait all operations done before closing the underlying file, or they'll fail
+	//
+	// TODO there seems be unpaired wg inc/dec causing this to wait forever,
+	//      don't wait with icd.mu locked for now, so jdfc can continue to work.
+	//      to track down actual bug later.
 	icfh.opc.Wait()
 
-	// remove this handle from it's inode's file handle list
-	if icfh.nextFH > 0 {
-		icd.fileHandles[icfh.nextFH].prevFH = icfh.prevFH
-	}
-	if icfh.prevFH > 0 { // not the list head, cut this handle out from the list
-		icd.fileHandles[icfh.prevFH].nextFH = icfh.nextFH
-	} else { // being the list head, modify ici pointer
-		ici := &icd.stoInodes[icfh.isi]
-		ici.fhHead = icfh.nextFH
-	}
+	func() {
+		icd.mu.Lock()
+		defer icd.mu.Unlock()
 
-	// fill fields with zero values
-	*icfh = icfHandle{}
+		// locked icd.mu again, check we are still good
+		if icfh.isi != isi { // released otherwise ?!
+			glog.Fatalf("FH [%v] isi changed [%v] => [%v] ?!", handle, isi, icfh.isi)
+			return
+		}
 
-	icd.freeFHIdxs = append(icd.freeFHIdxs, handle)
+		// grab handle data into return values before it gets cleared
+		inode, inoF = icfh.inode, icfh.f
+
+		// remove this handle from it's inode's file handle list
+		if icfh.nextFH > 0 {
+			icd.fileHandles[icfh.nextFH].prevFH = icfh.prevFH
+		}
+		if icfh.prevFH > 0 { // not the list head, cut this handle out from the list
+			icd.fileHandles[icfh.prevFH].nextFH = icfh.nextFH
+		} else { // being the list head, modify ici pointer
+			ici := &icd.stoInodes[icfh.isi]
+			ici.fhHead = icfh.nextFH
+		}
+
+		// fill fields with zero values
+		*icfh = icfHandle{}
+
+		icd.freeFHIdxs = append(icd.freeFHIdxs, handle)
+	}()
 
 	return
 }
