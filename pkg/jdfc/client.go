@@ -138,8 +138,8 @@ func MountJDFS(
 		fs.fuseConn = fuseConn
 	}()
 
-	fmt.Fprintf(os.Stderr, "JDFS client %d mounted [%s] on [%s]\n",
-		os.Getpid(), cfg.FSName, mountpoint)
+	fmt.Fprintf(os.Stderr, "JDFS client %d mounted [%s] by server %d on [%s]\n",
+		os.Getpid(), cfg.FSName, fs.jdfsPID, mountpoint)
 
 	if err = mfs.Join(context.Background()); err != nil {
 		return err
@@ -162,6 +162,7 @@ type fileSystem struct {
 	ho *hbi.HostingEnd
 
 	jdfsUID, jdfsGID uint32
+	jdfsPID          int
 }
 
 func (fs *fileSystem) NamesToExpose() []string {
@@ -216,6 +217,7 @@ Mount(%#v, %#v)
 		mountedFields := mountResult.(hbi.LitListType)
 		fs.jdfsUID = uint32(mountedFields[1].(hbi.LitIntType))
 		fs.jdfsGID = uint32(mountedFields[2].(hbi.LitIntType))
+		fs.jdfsPID = int(mountedFields[3].(hbi.LitIntType))
 
 		return
 	}(); err != nil {

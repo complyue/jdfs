@@ -130,7 +130,7 @@ func (efs *exportedFileSystem) Mount(readOnly bool, jdfsPath string) {
 
 	// send mount result fields
 	if err := co.SendObj(hbi.Repr(hbi.LitListType{
-		jdfRootInode, jdfsUID, jdfsGID,
+		jdfRootInode, jdfsUID, jdfsGID, os.Getpid(),
 	})); err != nil {
 		panic(err)
 	}
