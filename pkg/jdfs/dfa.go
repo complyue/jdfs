@@ -29,8 +29,8 @@ func listJDF(dir string, dfl *vfs.DataFileList, metaExt, dataExt string) {
 		glog.Warningf("LSDF failed opening dir [%s]:[%s] - %+v", jdfsRootPath, dir, err)
 		return
 	}
+	defer df.Close() // hold an ancestor dir open during recursion within it
 	childFIs, err := df.Readdir(0)
-	df.Close()
 	if err != nil {
 		glog.Errorf("LSDF failed reading dir [%s]:[%s] - %+v", jdfsRootPath, dir, err)
 		return
