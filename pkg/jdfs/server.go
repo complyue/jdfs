@@ -98,6 +98,9 @@ func (efs *exportedFileSystem) NamesToExpose() []string {
 		// direct data file access
 		"ListJDF", "OpenJDF", "AllocJDF", "ReadJDF", "WriteJDF", "ExtendJDF",
 		"SyncJDF", "CloseJDF",
+
+		// workset management methods
+		"MakeWorksetRoot", "DiscardWorksetRoots", "CommitWorkset",
 	}
 }
 
