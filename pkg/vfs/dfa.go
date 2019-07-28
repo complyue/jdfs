@@ -6,7 +6,12 @@ import (
 
 // direct data file access
 
-type DataFileHandle int
+type DataFileHandle struct {
+	// index into jdfs internal structure
+	Handle int
+	// to identify version of a data file
+	Inode InodeID
+}
 
 type DataFileList struct {
 	Sizes    []int64

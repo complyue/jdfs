@@ -200,7 +200,7 @@ func (efs *exportedFileSystem) AllocJDF(jdfPath string, replaceExisting bool,
 		return
 	}
 
-	if err := co.SendObj(hbi.Repr(handle)); err != nil {
+	if err := co.SendObj(fmt.Sprintf(`[%d,%d]`, handle.Handle, handle.Inode)); err != nil {
 		panic(err)
 	}
 }
@@ -297,12 +297,12 @@ func (efs *exportedFileSystem) OpenJDF(jdfPath string, headerBytes int,
 		panic(err)
 	}
 
-	if err := co.SendObj(hbi.Repr(handle)); err != nil {
+	if err := co.SendObj(fmt.Sprintf(`[%d,%d]`, handle.Handle, handle.Inode)); err != nil {
 		panic(err)
 	}
 }
 
-func (efs *exportedFileSystem) ReadJDF(handle vfs.DataFileHandle,
+func (efs *exportedFileSystem) ReadJDF(handle int, inode vfs.InodeID,
 	dataOffset, dataSize uintptr) {
 	co := efs.ho.Co()
 
@@ -310,7 +310,7 @@ func (efs *exportedFileSystem) ReadJDF(handle vfs.DataFileHandle,
 	defer efs.bufPool.Return(buf)
 
 	// do this before the underlying HBI wire released
-	dfh, err := efs.dfd.GetFileHandle(handle, 1)
+	dfh, err := efs.dfd.GetFileHandle(vfs.DataFileHandle{handle, inode}, 1)
 	if err != nil {
 		panic(err)
 	}
@@ -365,7 +365,7 @@ func (efs *exportedFileSystem) ReadJDF(handle vfs.DataFileHandle,
 	}
 }
 
-func (efs *exportedFileSystem) WriteJDF(handle vfs.DataFileHandle,
+func (efs *exportedFileSystem) WriteJDF(handle int, inode vfs.InodeID,
 	dataOffset, dataSize uintptr) {
 	co := efs.ho.Co()
 
@@ -376,7 +376,7 @@ func (efs *exportedFileSystem) WriteJDF(handle vfs.DataFileHandle,
 		panic(err)
 	}
 
-	dfh, err := efs.dfd.GetFileHandle(handle, 1)
+	dfh, err := efs.dfd.GetFileHandle(vfs.DataFileHandle{handle, inode}, 1)
 	if err != nil {
 		panic(err)
 	}
@@ -417,73 +417,11 @@ func (efs *exportedFileSystem) WriteJDF(handle vfs.DataFileHandle,
 	// todo send bytesWritten back ?
 }
 
-func (efs *exportedFileSystem) ExtendJDF(handle vfs.DataFileHandle,
-	headerBytes int, newSize uintptr) {
+func (efs *exportedFileSystem) SyncJDF(handle int, inode vfs.InodeID) {
 	co := efs.ho.Co()
 
 	// do this before the underlying HBI wire released
-	dfh, err := efs.dfd.GetFileHandle(handle, 1)
-	if err != nil {
-		panic(err)
-	}
-	var hdrBuf []byte
-	fse := vfs.FsErr(func() (err error) {
-		defer efs.dfd.FileHandleOpDone(dfh)
-
-		if err := co.FinishRecv(); err != nil {
-			panic(err)
-		}
-
-		if headerBytes > 0 {
-			hdrBuf = efs.bufPool.Get(headerBytes)
-			defer efs.bufPool.Return(hdrBuf)
-			var hdrReadBytes int
-			if hdrReadBytes, err = dfh.f.ReadAt(hdrBuf, 0); err != nil {
-				glog.Errorf("Error reading header of data file [%d] [%s]:[%s] with handle %d - %+v",
-					dfh.inode, jdfsRootPath, dfh.f.Name(), handle, err)
-				return
-			} else if hdrReadBytes != headerBytes {
-				glog.Warningf("Partial header [%d/%d] read from data file [%d] [%s]:[%s] with handle %d",
-					hdrReadBytes, headerBytes, dfh.inode, jdfsRootPath, dfh.f.Name(), handle)
-			}
-		}
-
-		if err = syscall.Ftruncate(int(dfh.f.Fd()), int64(newSize)); err != nil {
-			glog.Errorf("Error extending data file [%d] [%s]:[%s] to [%d] with handle %d - %+v",
-				dfh.inode, jdfsRootPath, dfh.f.Name(), newSize, handle, err)
-			return
-		}
-
-		if glog.V(2) {
-			glog.Infof("Extended data file [%d] [%s]:[%s] to [%d] with handle %d", dfh.inode,
-				jdfsRootPath, dfh.f.Name(), newSize, handle)
-		}
-		return
-	}())
-
-	if err := co.StartSend(); err != nil {
-		panic(err)
-	}
-
-	if err := co.SendObj(fse.Repr()); err != nil {
-		panic(err)
-	}
-	if fse != 0 {
-		return
-	}
-
-	if headerBytes > 0 {
-		if err = co.SendData(hdrBuf); err != nil {
-			panic(err)
-		}
-	}
-}
-
-func (efs *exportedFileSystem) SyncJDF(handle vfs.DataFileHandle) {
-	co := efs.ho.Co()
-
-	// do this before the underlying HBI wire released
-	dfh, err := efs.dfd.GetFileHandle(handle, 1)
+	dfh, err := efs.dfd.GetFileHandle(vfs.DataFileHandle{handle, inode}, 1)
 	if err != nil {
 		panic(err)
 	}
@@ -519,7 +457,7 @@ func (efs *exportedFileSystem) SyncJDF(handle vfs.DataFileHandle) {
 	}
 }
 
-func (efs *exportedFileSystem) CloseJDF(handle vfs.DataFileHandle) {
+func (efs *exportedFileSystem) CloseJDF(handle int, inode vfs.InodeID) {
 	co := efs.ho.Co()
 
 	// don't let file handle releasing hog the wire
@@ -527,7 +465,7 @@ func (efs *exportedFileSystem) CloseJDF(handle vfs.DataFileHandle) {
 		panic(err)
 	}
 
-	inode, f := efs.dfd.ReleaseFileHandle(handle)
+	f := efs.dfd.ReleaseFileHandle(vfs.DataFileHandle{handle, inode})
 	if f == nil {
 		glog.Fatal("no file pointer from released file handle ?!")
 		return

@@ -4,6 +4,7 @@ import (
 	"os"
 	"sync"
 
+	"github.com/complyue/jdfs/pkg/errors"
 	"github.com/complyue/jdfs/pkg/vfs"
 
 	"github.com/golang/glog"
@@ -82,7 +83,9 @@ func (dfd *icDFD) CreateFileHandle(jdfPath, metaExt, dataExt string, f *os.File)
 	}
 
 	// return this handle
-	handle = vfs.DataFileHandle(hsi)
+	handle = vfs.DataFileHandle{
+		Handle: hsi, Inode: im.inode,
+	}
 
 	if glog.V(2) {
 		glog.Infof("DFH created data file handle %d for [%d] [%s]:[%s]", handle, im.inode,
@@ -101,7 +104,11 @@ func (dfd *icDFD) GetFileHandle(handle vfs.DataFileHandle, incOpc int) (icfh dfH
 	defer dfd.mu.Unlock()
 
 	// the opc field (as a WaitGroup) can not be copied, must return a pointer
-	icfh = dfd.fileHandles[handle]
+	icfh = dfd.fileHandles[handle.Handle]
+	if icfh.inode != handle.Inode {
+		err = errors.Errorf("inode of dfh [%d] mismatch - %d vs %d",
+			handle.Handle, handle.Inode, icfh.inode)
+	}
 
 	if incOpc > 0 {
 		icfh.opc.Add(incOpc) // increase operation counter with mu locked
@@ -110,19 +117,23 @@ func (dfd *icDFD) GetFileHandle(handle vfs.DataFileHandle, incOpc int) (icfh dfH
 	return
 }
 
-func (dfd *icDFD) ReleaseFileHandle(handle vfs.DataFileHandle) (inode vfs.InodeID, inoF *os.File) {
+func (dfd *icDFD) ReleaseFileHandle(handle vfs.DataFileHandle) (inoF *os.File) {
 	var icfh dfHandle
 
 	func() {
 		dfd.mu.Lock()
 		defer dfd.mu.Unlock()
 
-		icfh = dfd.fileHandles[handle]
-		inode, inoF = icfh.inode, icfh.f
+		icfh = dfd.fileHandles[handle.Handle]
+		if icfh.inode != handle.Inode {
+			panic(errors.Errorf("inode of dfh [%d] mismatch - %d vs %d",
+				handle.Handle, handle.Inode, icfh.inode))
+		}
+		inoF = icfh.f
 
 		if glog.V(2) {
-			glog.Infof("DFH release wait data file handle %d for [%d] [%s]:[%s]", handle, inode,
-				jdfsRootPath, inoF.Name())
+			glog.Infof("DFH release wait data file handle [%d/%d] [%s]:[%s]",
+				handle.Handle, handle.Inode, jdfsRootPath, inoF.Name())
 		}
 	}()
 
@@ -134,21 +145,25 @@ func (dfd *icDFD) ReleaseFileHandle(handle vfs.DataFileHandle) (inode vfs.InodeI
 		defer dfd.mu.Unlock()
 
 		// locked dfd.mu again, check we are still good
-		icfh = dfd.fileHandles[handle]
-		if icfh.inode != inode || icfh.f != inoF {
-			glog.Fatalf("DFH [%v] changed [%v](%v) => [%v](%v) ?!",
-				handle, inode, inoF, icfh.inode, icfh.f)
+		icfh = dfd.fileHandles[handle.Handle]
+		if icfh.inode != handle.Inode {
+			panic(errors.Errorf("inode of dfh [%d] mismatch - %d vs %d",
+				handle.Handle, handle.Inode, icfh.inode))
+		}
+		if icfh.f != inoF {
+			glog.Fatalf("DFH [%d/%d] file changed [%v] => [%v] ?!",
+				handle.Handle, handle.Inode, inoF, icfh.f)
 			return
 		}
 
 		// fill fields with zero values
-		dfd.fileHandles[handle] = dfHandle{}
+		dfd.fileHandles[handle.Handle] = dfHandle{}
 
-		dfd.freeFHIdxs = append(dfd.freeFHIdxs, int(handle))
+		dfd.freeFHIdxs = append(dfd.freeFHIdxs, int(handle.Handle))
 
 		if glog.V(2) {
-			glog.Infof("DFH release ready data file handle %d for [%d] [%s]:[%s]", handle, inode,
-				jdfsRootPath, inoF.Name())
+			glog.Infof("DFH release ready data file handle [%d/%d] [%s]:[%s]",
+				handle.Handle, handle.Inode, jdfsRootPath, inoF.Name())
 		}
 	}()
 
