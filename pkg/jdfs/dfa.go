@@ -302,6 +302,60 @@ func (efs *exportedFileSystem) OpenJDF(jdfPath string, headerBytes int,
 	}
 }
 
+func (efs *exportedFileSystem) StatJDF(jdfPath string, metaExt, dataExt string) {
+	co := efs.ho.Co()
+
+	if err := co.FinishRecv(); err != nil {
+		panic(err)
+	}
+
+	var dfSize int64
+	var inode vfs.InodeID
+	fse := vfs.FsErr(func() (err error) {
+		// todo not checking meta file for now, need to in the future ?
+
+		dfPath := jdfPath + dataExt
+		var f *os.File
+		f, err = os.OpenFile(dfPath, os.O_RDWR, 0644)
+		if err != nil {
+			return
+		}
+		defer f.Close()
+
+		var fi os.FileInfo
+		if fi, err = f.Stat(); err != nil {
+			return
+		}
+		im := fi2im(dfPath, fi)
+		inode = im.inode
+
+		dfSize, err = f.Seek(0, 2)
+		if err != nil {
+			return
+		}
+
+		return
+	}())
+
+	if err := co.StartSend(); err != nil {
+		panic(err)
+	}
+
+	if err := co.SendObj(fse.Repr()); err != nil {
+		panic(err)
+	}
+	if fse != 0 {
+		return
+	}
+
+	if err := co.SendObj(hbi.Repr(inode)); err != nil {
+		panic(err)
+	}
+	if err := co.SendObj(hbi.Repr(dfSize)); err != nil {
+		panic(err)
+	}
+}
+
 func (efs *exportedFileSystem) ReadJDF(handle int, inode vfs.InodeID,
 	dataOffset, dataSize uintptr) {
 	co := efs.ho.Co()
