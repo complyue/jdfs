@@ -78,13 +78,23 @@ func (efs *exportedFileSystem) DiscardWorksetRoot(wsrd string) {
 	}
 }
 
-// CommitWorkset moves data files under the specified workset root dir to overwrite
-// public data files at same path, then remove the workset root dir for cleanup.
+// CommitWorkset moves specified persistent data files under the workset root dir to
+// overwrite public data files at same path.
 //
-// todo restrict to specific metaExt/dataExt ?
 // todo support for 2 phase commit ?
-func (efs *exportedFileSystem) CommitWorkset(wsrd string) {
+func (efs *exportedFileSystem) CommitWorkset(wsrd string, nFiles int,
+	metaExt, dataExt string) {
 	co := efs.ho.Co()
+
+	pubPathList := make([]string, nFiles)
+	for i := 0; i < nFiles; i++ {
+		if pubPath, err := co.RecvObj(); err != nil {
+			panic(err)
+		} else {
+			pubPathList[i] = pubPath.(string)
+		}
+	}
+
 	// release wire during working
 	if err := co.FinishRecv(); err != nil {
 		panic(err)
@@ -109,17 +119,20 @@ func (efs *exportedFileSystem) CommitWorkset(wsrd string) {
 		return
 	}
 
-	// move all data files under workset root dir to overwrite public data files at same path
-	//
 	// todo currently it's a best-effort commit and prone to partial errors during the commit.
-	//      implement jdfs node scoped workset lock, make use of ZFS snapshot to implement
+	//      consider jdfs node scoped workset lock, make use of ZFS snapshot to implement
 	//      atomic recovery from commit failures. note it might be mandatory for jdfsRootPath
-	//      to be a ZFS filesystem root for free of collision of the snapshot mechanism.
-	commitFiles(wsrd, "")
-
-	// cleanup workset root dir
-	if err := os.RemoveAll(wsrd); err != nil {
-		glog.Error("WS failed removing workset root dir [%s] after committed - %+v", wsrd, err)
+	//      to be a ZFS filesystem root for free of collision with the snapshot mechanism.
+	for _, pubPath := range pubPathList {
+		privPath := wsrd + "/" + pubPath
+		if err := os.Rename(privPath+metaExt, pubPath+metaExt); err != nil {
+			errReason = fmt.Sprintf("Failed committing meta file [%s]", pubPath)
+			return
+		}
+		if err := os.Rename(privPath+dataExt, pubPath+dataExt); err != nil {
+			errReason = fmt.Sprintf("Failed committing data file [%s]", pubPath)
+			return
+		}
 	}
 }
 
