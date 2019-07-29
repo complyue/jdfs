@@ -115,7 +115,7 @@ func (efs *exportedFileSystem) CommitWorkset(wsrd string) {
 	//      implement jdfs node scoped workset lock, make use of ZFS snapshot to implement
 	//      atomic recovery from commit failures. note it might be mandatory for jdfsRootPath
 	//      to be a ZFS filesystem root for free of collision of the snapshot mechanism.
-	commitFiles(wsrd, "/")
+	commitFiles(wsrd, "")
 
 	// cleanup workset root dir
 	if err := os.RemoveAll(wsrd); err != nil {
@@ -125,34 +125,41 @@ func (efs *exportedFileSystem) CommitWorkset(wsrd string) {
 
 // process work dir `wd` for commit of the workset identified by the root dir `wsrd`
 func commitFiles(wsrd, wd string) {
-	// Note: pwd is jdfsRootPath; wd should starts with '/', but all paths to underlying
-	// fs should be relative so as to be against jdfsRootPath.
-	wsd := wsrd + wd
+	// Note: pwd is jdfsRootPath, all paths to underlying fs should be relative,
+	// so as to be against jdfsRootPath.
+	wsd := wsrd
+	if len(wd) > 0 {
+		wsd = wsrd + "/" + wd
+	}
 	df, err := os.OpenFile(wsd, os.O_RDONLY, 0)
 	if err != nil {
-		glog.Warning("WS failed open workset dir [%s]:[%s] - %+v", jdfsRootPath, wsd, err)
+		glog.Warningf("WS failed open workset dir [%s]:[%s] - %+v", jdfsRootPath, wsd, err)
 		return
 	}
 	defer df.Close() // hold an ancestor dir open during recursion within it
 	childFIs, err := df.Readdir(0)
 	if err != nil {
-		glog.Errorf("WS failed reading workset dir [%s]:[%s]$[%s] - %+v",
-			jdfsRootPath, wsrd, wd, err)
+		glog.Errorf("WS failed reading workset dir [%s]:[%s] - %+v", jdfsRootPath, wsd, err)
 		return
 	}
 	for _, childFI := range childFIs {
 		fn := childFI.Name()
 		if childFI.IsDir() {
 			// a dir
-			pubDir := wd[1:] + fn
+			pubDir := fn
+			if len(wd) > 0 {
+				pubDir = wd + "/" + fn
+			}
 			os.MkdirAll(pubDir, 0755)
-			subWorkDir := wd + fn
-			commitFiles(wsrd, subWorkDir)
+			commitFiles(wsrd, pubDir)
 		} else if childFI.Mode().IsRegular() {
 			// a regular file
-			pubPath := wd[1:] + fn
-			wsfPath := wsd + fn
-			if err := os.Rename(wsfPath, pubPath); err != nil {
+			pubPath := fn
+			if len(wd) > 0 {
+				pubPath = wd + "/" + fn
+			}
+			privPath := wsd + "/" + fn
+			if err := os.Rename(privPath, pubPath); err != nil {
 				// TODO fail the whole commit, atomatically
 				glog.Errorf("WS failed committing workset file [%s]:[%s]$[%s] - %+v",
 					jdfsRootPath, wsrd, pubPath, err)
