@@ -100,7 +100,7 @@ func (efs *exportedFileSystem) NamesToExpose() []string {
 		"OpenJDF", "ReadJDF", "WriteJDF", "SyncJDF", "CloseJDF",
 
 		// workset management methods
-		"MakeWorksetRoot", "DiscardWorksetRoots", "CommitWorkset",
+		"MakeWorksetRoot", "DiscardWorksetRoot", "CommitWorkset",
 	}
 }
 
