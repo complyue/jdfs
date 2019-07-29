@@ -43,7 +43,7 @@ func (efs *exportedFileSystem) MakeWorksetRoot(baseDir, nameHint string) {
 		return
 	}
 	// ensure the baseDir dir
-	if err := os.MkdirAll(baseDir, 0644); err != nil && !os.IsExist(err) {
+	if err := os.MkdirAll(baseDir, 0755); err != nil && !os.IsExist(err) {
 		errReason = fmt.Sprintf("can not create workset base dir [%s] - %+v", baseDir, err)
 		return
 	}
@@ -51,15 +51,14 @@ func (efs *exportedFileSystem) MakeWorksetRoot(baseDir, nameHint string) {
 	wsrd = fmt.Sprintf("%s/%s", baseDir, nameHint)
 	seq := 1
 	for ; seq <= 50000; seq++ {
-		if err := os.Mkdir(wsrd, 0644); err == nil {
-			break
+		if err := os.Mkdir(wsrd, 0755); err == nil {
+			return
 		} else if !os.IsExist(err) {
 			errReason = fmt.Sprintf("unexpected error making workset dir [%s] - %+v",
 				wsrd, err)
-			break
+			return
 		}
 		wsrd = fmt.Sprintf("%s/%s-%d", baseDir, nameHint, seq)
-		return
 	}
 	errReason = fmt.Sprintf("so many (%d) worksets under name [%s]$[%s] ?!",
 		seq-1, baseDir, nameHint)
@@ -151,7 +150,7 @@ func commitFiles(wsrd, wd string) {
 		if childFI.IsDir() {
 			// a dir
 			pubDir := wd[1:] + fn
-			os.MkdirAll(pubDir, 0644)
+			os.MkdirAll(pubDir, 0755)
 			subWorkDir := wd + fn
 			commitFiles(wsrd, subWorkDir)
 		} else if childFI.Mode().IsRegular() {
