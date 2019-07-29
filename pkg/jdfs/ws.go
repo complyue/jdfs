@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/complyue/hbi"
-
 	"github.com/golang/glog"
 )
 
@@ -64,22 +62,19 @@ func (efs *exportedFileSystem) MakeWorksetRoot(baseDir, nameHint string) {
 		seq-1, baseDir, nameHint)
 }
 
-// DiscardWorksetRoots removes a list of workset root dirs, effectively roll them back.
-func (efs *exportedFileSystem) DiscardWorksetRoots(wsrdList hbi.LitListType) {
+// DiscardWorksetRoot removes a workset root dir for cleanup
+func (efs *exportedFileSystem) DiscardWorksetRoot(wsrd string) {
 	co := efs.ho.Co()
 	// release wire during working
 	if err := co.FinishRecv(); err != nil {
 		panic(err)
 	}
 
-	for _, wsrd := range wsrdList {
-		wsrd := wsrd.(string)
-		if len(wsrd) <= 1 || wsrd[0] != '.' {
-			glog.Error("WS not removing malformed workset root dir [%s]", wsrd)
-		}
-		if err := os.RemoveAll(wsrd); err != nil {
-			glog.Error("WS failed removing workset root dir [%s] - %+v", wsrd, err)
-		}
+	if len(wsrd) <= 1 || wsrd[0] != '.' {
+		glog.Errorf("WS not removing malformed workset root dir [%s]", wsrd)
+	}
+	if err := os.RemoveAll(wsrd); err != nil {
+		glog.Errorf("WS failed removing workset root dir [%s] - %+v", wsrd, err)
 	}
 }
 
