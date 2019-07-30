@@ -88,7 +88,7 @@ func (dfd *icDFD) CreateFileHandle(jdfPath, metaExt, dataExt string, f *os.File)
 	}
 
 	if glog.V(2) {
-		glog.Infof("DFH created data file handle %d for [%d] [%s]:[%s]", handle, im.inode,
+		glog.Infof("DFH created data file handle %d for [%d] [%s]:[%s]", handle.Handle, handle.Inode,
 			jdfsRootPath, f.Name())
 	}
 
