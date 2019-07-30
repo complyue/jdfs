@@ -3,6 +3,7 @@ package jdfs
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/golang/glog"
 )
@@ -114,7 +115,7 @@ func (efs *exportedFileSystem) CommitWorkset(wsrd string, nFiles int,
 
 	// validate wsrd
 	if len(wsrd) <= 1 || wsrd[0] != '.' {
-		glog.Error("WS not comitting malformed workset root dir [%s]", wsrd)
+		glog.Errorf("WS not comitting malformed workset root dir [%s]", wsrd)
 		errReason = "bad wsrd"
 		return
 	}
@@ -123,17 +124,43 @@ func (efs *exportedFileSystem) CommitWorkset(wsrd string, nFiles int,
 	//      consider jdfs node scoped workset lock, make use of ZFS snapshot to implement
 	//      atomic recovery from commit failures. note it might be mandatory for jdfsRootPath
 	//      to be a ZFS filesystem root for free of collision with the snapshot mechanism.
+
+	ed := ensuredDirs{madeDirs: make(map[string]struct{}, 2*len(pubPathList))}
 	for _, pubPath := range pubPathList {
+		if err := ed.ensure(filepath.Dir(pubPath)); err != nil {
+			errReason = fmt.Sprintf("Failed making parent dir for public path [%s] - %+v",
+				pubPath, err)
+			return
+		}
 		privPath := wsrd + "/" + pubPath
 		if err := os.Rename(privPath+metaExt, pubPath+metaExt); err != nil {
-			errReason = fmt.Sprintf("Failed committing meta file [%s]", pubPath)
+			errReason = fmt.Sprintf("Failed committing meta file [%s] - %+v", pubPath, err)
 			return
 		}
 		if err := os.Rename(privPath+dataExt, pubPath+dataExt); err != nil {
-			errReason = fmt.Sprintf("Failed committing data file [%s]", pubPath)
+			errReason = fmt.Sprintf("Failed committing data file [%s] - %+v", pubPath, err)
 			return
 		}
 	}
+}
+
+// ensuredDirs maintains a set of dirs ensured to exists during a course of dir tree making,
+// to reduce trips to kernel (syscall) as much as possible.
+type ensuredDirs struct {
+	madeDirs map[string]struct{}
+}
+
+func (ed ensuredDirs) ensure(dir string) error {
+	if _, made := ed.madeDirs[dir]; made {
+		return nil
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	for d := dir; len(d) > 0 && d != "." && d != "/"; d = filepath.Dir(d) {
+		ed.madeDirs[d] = struct{}{}
+	}
+	return nil
 }
 
 // process work dir `wd` for commit of the workset identified by the root dir `wsrd`
