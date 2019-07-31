@@ -97,8 +97,7 @@ func FsErr(fsErr error) FsError {
 	case FsError:
 		return fse
 	case syscall.Errno:
-		// todo validate the error number is portable here ?
-		return FsError(fse)
+		return translateSysErrno(fse)
 	case *os.PathError:
 		return FsErr(fse.Err)
 	default:
