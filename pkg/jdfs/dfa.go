@@ -20,11 +20,12 @@ import (
 // direct data file access methods
 
 func listJDF(dir string, dfl *vfs.DataFileList, metaExt, dataExt string) {
-	if len(dir) <= 0 {
-		dir = "."
-	}
 
-	df, err := os.OpenFile(dir, os.O_RDONLY, 0)
+	dir2open := dir
+	if len(dir2open) <= 0 {
+		dir2open = "."
+	}
+	df, err := os.OpenFile(dir2open, os.O_RDONLY, 0)
 	if err != nil {
 		glog.Warningf("LSDF failed opening dir [%s]:[%s] - %+v", jdfsRootPath, dir, err)
 		return
@@ -41,6 +42,9 @@ func listJDF(dir string, dfl *vfs.DataFileList, metaExt, dataExt string) {
 	dataSizes := make(map[string]int64)
 	for _, childFI := range childFIs {
 		fn := childFI.Name()
+		if fn[0] == '.' {
+			continue // ignore either file or dir started with a dot
+		}
 		if childFI.IsDir() {
 			// a dir
 			subdirList = append(subdirList, fn)
@@ -48,13 +52,13 @@ func listJDF(dir string, dfl *vfs.DataFileList, metaExt, dataExt string) {
 			// a regular file
 			if strings.HasSuffix(fn, metaExt) {
 				dfPath := fn[:len(fn)-len(metaExt)]
-				if dir != "." {
+				if len(dir) > 0 {
 					dfPath = dir + "/" + dfPath
 				}
 				metaList = append(metaList, dfPath)
 			} else if strings.HasSuffix(fn, dataExt) {
 				dfPath := fn[:len(fn)-len(dataExt)]
-				if dir != "." {
+				if len(dir) > 0 {
 					dfPath = dir + "/" + dfPath
 				}
 				dataSizes[dfPath] = childFI.Size()
@@ -76,7 +80,7 @@ func listJDF(dir string, dfl *vfs.DataFileList, metaExt, dataExt string) {
 
 	for _, subdir := range subdirList {
 		dfPath := subdir
-		if dir != "." {
+		if len(dir) > 0 {
 			dfPath = fmt.Sprintf("%s/%s", dir, subdir)
 		}
 		listJDF(dfPath, dfl, metaExt, dataExt)
