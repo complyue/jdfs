@@ -503,7 +503,9 @@ func (c *Connection) Reply(ctx context.Context, opErr error) {
 	if !noResponse {
 		err := c.writeMessage(outMsg.Bytes())
 		if err != nil && c.errorLogger != nil {
-			c.errorLogger.Printf("writeMessage: %v %v", err, outMsg.Bytes())
+			// out header is 16 bytes long, don't include too much data to whelm
+			// the log output
+			c.errorLogger.Printf("writeMessage: %v %v", err, outMsg.Bytes()[:20])
 		}
 	}
 }
