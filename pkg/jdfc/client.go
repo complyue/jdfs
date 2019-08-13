@@ -97,7 +97,8 @@ func MountJDFS(
 		return nil
 	}
 
-	he.ExposeFunction("__hbi_cleanup__", func(discReason string) {
+	he.ExposeFunction("__hbi_cleanup__", func(
+		po *hbi.PostingEnd, ho *hbi.HostingEnd, discReason string) {
 		// terminate jdfc (the FUSE user process), this leaves the mountpoint denying all
 		// services. this is actually better than unmounting it, as naive programs may
 		// think all files have been deleted due to the unmount, or even
