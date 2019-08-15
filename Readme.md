@@ -57,7 +57,7 @@ proxies all file operations on behalf of the **jdfc**:
   - mapped 1 to 1 from **jdfc** on Linux
   - forged by osxfuse from **jdfc** on macOS
 - read/write/mmap
-  - forged by all FUSE kernels
+  - forged by all FUSE kernels with writeback cache enabled
 
 Any new connection is treated by the **jdfs** as a fresh new mount, a fresh server
 process is started to proxy all operations from the connecting **jdfc**.
