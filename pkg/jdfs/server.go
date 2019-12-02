@@ -96,7 +96,7 @@ func (efs *exportedFileSystem) NamesToExpose() []string {
 		"GetXattr", "ListXattr", "SetXattr",
 
 		// direct data file access
-		"ListJDF", "StatJDF", "AllocJDF",
+		"ListJDF", "StatJDF", "AllocJDF", "CopyJDF",
 		"OpenJDF", "ReadJDF", "WriteJDF", "SyncJDF", "CloseJDF",
 
 		// workset management methods

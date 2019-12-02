@@ -209,6 +209,125 @@ func (efs *exportedFileSystem) AllocJDF(jdfPath string, replaceExisting bool,
 	}
 }
 
+func (efs *exportedFileSystem) CopyJDF(Handle int, inode vfs.InodeID, allocjdfPath string, replaceExisting bool,
+	dfSize, copySize, sliceStartSize, dataOffset uintptr, headerSize int, metaSize int32, metaExt, dataExt string) {
+	co := efs.ho.Co()
+
+	var hdrBuf, metaBuf []byte
+	hdrBuf = efs.bufPool.Get(headerSize)
+	defer efs.bufPool.Return(hdrBuf)
+	if err := co.RecvData(hdrBuf); err != nil {
+		panic(err)
+	}
+	if metaSize > 0 {
+		metaBuf = efs.bufPool.Get(int(metaSize))
+		defer efs.bufPool.Return(metaBuf)
+		if err := co.RecvData(metaBuf); err != nil {
+			panic(err)
+		}
+	}
+
+	if err := co.FinishRecv(); err != nil {
+		panic(err)
+	}
+
+	odfh, err := efs.dfd.GetFileHandle(vfs.DataFileHandle{Handle, inode}, 1)
+	if err != nil {
+		panic(err)
+	}
+
+	// var hdrBuf, metaBuf []byte
+	// var dfSize uint64
+	var handle vfs.DataFileHandle
+
+	fse := vfs.FsErr(func() (err error) {
+		os.MkdirAll(filepath.Dir(allocjdfPath), 0750)
+		allocmfPath := allocjdfPath + metaExt
+		if replaceExisting { // remove existing and ignore error - esp. ENOENT
+			syscall.Unlink(allocmfPath)
+		}
+		if err = ioutil.WriteFile(allocmfPath, metaBuf, 0644); err != nil {
+			return
+		}
+
+		allocdfPath := allocjdfPath + dataExt
+		if replaceExisting { // remove existing and ignore error - esp. ENOENT
+			syscall.Unlink(allocdfPath)
+		}
+		var allocf *os.File
+		allocf, err = os.OpenFile(allocdfPath, os.O_CREATE|os.O_RDWR, 0644)
+		if err != nil {
+			return
+		}
+		defer func() {
+			if err != nil {
+				allocf.Close()
+			}
+		}()
+
+		if err = syscall.Ftruncate(int(allocf.Fd()), int64(dfSize)); err != nil {
+			return
+		}
+
+		var bytesWritten int
+		if bytesWritten, err = allocf.WriteAt(hdrBuf, 0); err != nil {
+			return
+		} else if bytesWritten != headerSize {
+			err = errors.Errorf("Partial header [%d/%d] written!", bytesWritten, headerSize)
+			return
+		}
+
+		var openmm, allocmm []byte
+		if openmm, err = syscall.Mmap(int(odfh.f.Fd()), 0, int(sliceStartSize) + int(dataOffset) + int(copySize), syscall.PROT_READ, syscall.MAP_SHARED); err != nil {
+			panic(err)
+		}
+		if allocmm, err = syscall.Mmap(int(allocf.Fd()), 0, int(copySize) + int(dataOffset), syscall.PROT_READ | syscall.PROT_WRITE, syscall.MAP_SHARED); err != nil {
+			panic(err)
+		}
+
+		var copyWrittend int
+		copyWrittend = copy(allocmm[int(dataOffset):], openmm[int(sliceStartSize) + int(dataOffset):])
+		if copyWrittend != int(copySize) {
+			err = errors.Errorf("Partial copyData [%d/%d] written!", copyWrittend, int(copySize))
+			return
+		}
+
+		handle, err = efs.dfd.CreateFileHandle(allocjdfPath, metaExt, dataExt, allocf)
+		if err != nil {
+			return
+		}
+
+		// closef := efs.dfd.ReleaseFileHandle(vfs.DataFileHandle{Handle, inode})
+		// if closef == nil {
+		// 	glog.Fatal("no file pointer from released file handle ?!")
+		// 	return
+		// }
+	
+		// closedfPath := closef.Name()
+		// if err := closef.Close(); err != nil {
+		// 	glog.Errorf("Error on closing jdfs data file [%s]:[%s] - %+v",
+		// 		jdfsRootPath, closedfPath, err)
+		// }
+
+		return
+	}())
+
+	if err := co.StartSend(); err != nil {
+		panic(err)
+	}
+
+	if err := co.SendObj(fse.Repr()); err != nil {
+		panic(err)
+	}
+	if fse != 0 {
+		return
+	}
+
+	if err := co.SendObj(fmt.Sprintf(`[%d,%d]`, handle.Handle, handle.Inode)); err != nil {
+		panic(err)
+	}
+}
+
 func (efs *exportedFileSystem) OpenJDF(jdfPath string, headerBytes int,
 	metaExt, dataExt string) {
 	co := efs.ho.Co()
